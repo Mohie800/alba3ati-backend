@@ -1,8 +1,15 @@
-const { ROUND_TIME, DIS_DUE } = require("../../utils/constants");
+const { ROUND_TIME, VOTE_TIME } = require("../../utils/constants");
 const Room = require("../models/room.model");
 const claculateResult = require("./calculate.game");
 const { claculateVoteResult } = require("./claculateVoteResult.game");
 const { startTimer } = require("./timer.game");
+const { clearSkipVotes } = require("./skipDiscussion.game");
+
+// Start a separate voting timer instead of counting votes immediately
+const startVotingPhase = async (io, roomId) => {
+  clearSkipVotes(roomId);
+  startTimer(io, VOTE_TIME, roomId, "votingTimeUp", claculateVoteResult);
+};
 
 module.exports.nightResults = async (io, roomId, voted) => {
   try {
@@ -16,13 +23,16 @@ module.exports.nightResults = async (io, roomId, voted) => {
     const alivePlayers = room.players.filter((p) => p.status === "alive");
     await room.save();
     const ba3atiCount = alivePlayers.filter((p) => p.roleId === "1").length;
-    const villagersCount = alivePlayers.filter((p) => p.roleId !== "1").length;
-    if (ba3atiCount > villagersCount) {
+    const abuJanzeerCount = alivePlayers.filter((p) => p.roleId === "5").length;
+    const villagersCount = alivePlayers.filter((p) => p.roleId !== "1" && p.roleId !== "5").length;
+    if (alivePlayers.length === 1 && abuJanzeerCount === 1) {
+      // abu janzeer wins 3
+      io.to(roomId).emit("gameOver", { room, win: "3" });
+    } else if (ba3atiCount > 0 && ba3atiCount >= villagersCount + abuJanzeerCount) {
       // ba3ati wins 1
       io.to(roomId).emit("gameOver", { room, win: "1" });
-    } else if (villagersCount > 0 && ba3atiCount === 0) {
+    } else if (villagersCount > 0 && ba3atiCount === 0 && abuJanzeerCount === 0) {
       // villagers win 2
-      console.log(roomId);
       io.to(roomId).emit("gameOver", { room, win: "2" });
     } else if (alivePlayers.length === 0) {
       io.to(roomId).emit("gameOver", { room, win: "0" });
@@ -36,7 +46,7 @@ module.exports.nightResults = async (io, roomId, voted) => {
           ROUND_TIME,
           roomId,
           "timerEnd",
-          claculateResult.claculateResult
+          claculateResult.claculateResult,
         );
       } else {
         startTimer(
@@ -44,7 +54,7 @@ module.exports.nightResults = async (io, roomId, voted) => {
           room.discussionTime,
           roomId,
           "timerEnds",
-          claculateVoteResult
+          startVotingPhase,
         );
       }
       return true;

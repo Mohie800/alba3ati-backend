@@ -8,3 +8,4 @@ exports.ROLES = [
 
 exports.ROUND_TIME = 500;
 exports.DIS_DUE = 10;
+exports.VOTE_TIME = 30;

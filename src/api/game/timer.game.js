@@ -52,5 +52,12 @@ exports.startTimer = async (io, timeInSec, roomId, eventString, cb) => {
   io.to(roomId).emit("tick", remainingTime);
 };
 
+exports.cancelTimer = (roomId) => {
+  if (activeTimers.has(roomId)) {
+    clearInterval(activeTimers.get(roomId).intervalId);
+    activeTimers.delete(roomId);
+  }
+};
+
 // Example usage:
 // startTimer(io, 60, 'room-123', 'timer-complete');

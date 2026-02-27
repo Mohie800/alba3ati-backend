@@ -1,6 +1,7 @@
 const Room = require("../models/room.model");
 const res = require("./results.game");
 const { startTimer } = require("./timer.game");
+const { clearSkipVotes } = require("./skipDiscussion.game");
 const resetPlayingStatus = async (roomId) => {
   try {
     const room = await Room.findOne({ roomId });
@@ -11,8 +12,11 @@ const resetPlayingStatus = async (roomId) => {
     room.al3omdaTargets = [];
     room.ba3atiTargets = [];
     room.damazeenTargets = [];
+    room.sitAlwada3Targets = [];
+    room.abuJanzeerTargets = [];
     room.damazeenProtection = false;
     await room.save();
+    clearSkipVotes(roomId);
     return;
   } catch (error) {
     console.log(error);

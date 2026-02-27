@@ -10,14 +10,19 @@ const {
   startGame,
   damazeenAction,
   damazeenProtection,
+  sitAlwada3Action,
+  abuJanzeerAction,
+  skipNightAction,
 } = require("../api/game/room.actions");
 const { voteSubmit } = require("../api/game/votes.game");
+const { skipDiscussionVote } = require("../api/game/skipDiscussion.game");
 const {
   getActiveRooms,
   joinRoom,
   leaveRoom,
   publicRoom,
 } = require("../api/controllers/room.controller");
+const initChat = require("../api/services/chat.service");
 
 module.exports = (server) => {
   const io = SocketIO(server, {
@@ -32,9 +37,16 @@ module.exports = (server) => {
       .toString(36)
       .substring(2, 2 + length);
   }
+  // Initialize chat namespace
+  initChat(io);
+
   // Connection handler
   io.on("connection", (socket) => {
     console.log("New client connected");
+
+    // Track which room this socket is in and who they are
+    socket.gameRoomId = null;
+    socket.playerId = null;
 
     // Handle room creation
     socket.on("createRoom", async (host) => {
@@ -53,9 +65,10 @@ module.exports = (server) => {
         );
         // Join the room
         joinRoom(io, socket, roomId);
+        socket.gameRoomId = roomId;
+        socket.playerId = host;
 
         // Notify the host
-        // console.log(roomDetails);
         socket.emit("roomCreated", {
           room: roomDetails,
         });
@@ -64,9 +77,6 @@ module.exports = (server) => {
         io.to(roomId).emit("roomUpdated", { room });
         const rooms = await getActiveRooms();
         io.emit("roomsUpdate", rooms);
-        socket.on("disconnect", () => {
-          leaveRoom(io, socket, roomId);
-        });
       } catch (error) {
         console.error("Error creating room:", error);
         socket.emit("error", { message: "Failed to create room" });
@@ -79,32 +89,41 @@ module.exports = (server) => {
     // Backend Socket.IO handlers
     socket.on("joinRoom", async ({ roomId, player }) => {
       try {
-        const room = await Room.findOne({ roomId });
+        const room = await Room.findOne({ roomId }).populate("players.player");
 
         if (!room) {
           socket.emit("joinError", { message: "Room not found" });
           return;
         }
 
-        if (room.players.length >= 15) {
-          // Example player limit
-          socket.emit("joinError", { message: "Room is full" });
-          return;
+        // Check if player already exists in room (reconnect scenario)
+        const alreadyInRoom = room.players.some(
+          (p) => p.player._id.toString() === player
+        );
+
+        let updatedRoom;
+        if (alreadyInRoom) {
+          // Rejoin socket room without adding duplicate player entry
+          updatedRoom = room;
+        } else {
+          if (room.players.length >= 15) {
+            socket.emit("joinError", { message: "Room is full" });
+            return;
+          }
+
+          updatedRoom = await Room.findByIdAndUpdate(
+            room._id,
+            { $push: { players: { player } } },
+            { new: true }
+          ).populate("players.player");
         }
 
-        const updatedRoom = await Room.findByIdAndUpdate(
-          room._id,
-          { $push: { players: { player } } },
-          { new: true }
-        ).populate("players.player");
-
         joinRoom(io, socket, roomId);
+        socket.gameRoomId = roomId;
+        socket.playerId = player;
+
         socket.emit("roomJoined", updatedRoom);
         io.to(roomId).emit("playerJoined", updatedRoom);
-        socket.on("disconnect", () => {
-          leaveRoom(io, socket, roomId);
-          console.log("dddd");
-        });
       } catch (error) {
         socket.emit("joinError", { message: "Failed to join room" });
       }
@@ -112,17 +131,19 @@ module.exports = (server) => {
 
     socket.on("disconnect", () => {
       console.log("Client disconnected");
+      if (socket.gameRoomId) {
+        leaveRoom(io, socket, socket.gameRoomId, socket.playerId);
+        socket.gameRoomId = null;
+        socket.playerId = null;
+      }
     });
-    socket.on("home", () => {
-      //leave all rooms
-      console.log(socket.rooms);
-      const rooms = Array.from(socket.rooms);
 
-      rooms.map((room, i) => {
-        if (i === 0) return;
-        socket.leave(room);
-      });
-      console.log(socket.rooms);
+    socket.on("home", () => {
+      if (socket.gameRoomId) {
+        leaveRoom(io, socket, socket.gameRoomId, socket.playerId);
+        socket.gameRoomId = null;
+        socket.playerId = null;
+      }
     });
 
     //start the game (do not allow players to join)
@@ -139,11 +160,15 @@ module.exports = (server) => {
     socket.on("damazeenProtection", (arg) =>
       damazeenProtection(io, socket, arg)
     );
+    socket.on("sitAlwada3Action", (arg) => sitAlwada3Action(io, socket, arg));
+    socket.on("abuJanzeerAction", (arg) => abuJanzeerAction(io, socket, arg));
+    socket.on("skipNightAction", (arg) => skipNightAction(io, socket, arg));
     //................................................................
 
     //----------------------------------------------------------------
     //votes
     socket.on("vote", (arg) => voteSubmit(io, socket, arg));
+    socket.on("skipDiscussion", (arg) => skipDiscussionVote(io, socket, arg));
     //............................................................
 
     //----------------------------------------------------------------

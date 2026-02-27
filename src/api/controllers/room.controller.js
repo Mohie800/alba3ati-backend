@@ -1,8 +1,7 @@
 const Room = require("../models/room.model");
 
-exports.getActiveRooms = async () => {
+const getActiveRooms = async () => {
   try {
-    // Fetch all active rooms
     const activeRooms = await Room.find({
       status: "waiting",
       isPublic: true,
@@ -14,37 +13,48 @@ exports.getActiveRooms = async () => {
   }
 };
 
-exports.joinRoom = async (io, socket, roomId) => {
-  socket.join(roomId);
-  const room = await Room.findOne({ roomId });
-  if (!room) {
-    return socket.emit("roomNotFound", { message: "Room not found" });
-  }
-  room.activePlayers = room.activePlayers + 1;
-  await room.save();
-  return;
+const getSocketCount = (io, roomId) => {
+  const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
+  return socketsInRoom ? socketsInRoom.size : 0;
 };
 
-exports.leaveRoom = async (io, socket, roomId) => {
+const joinRoom = async (io, socket, roomId) => {
+  socket.join(roomId);
+  // Sync activePlayers from Socket.IO (source of truth)
+  const count = getSocketCount(io, roomId);
+  await Room.updateOne({ roomId }, { $set: { activePlayers: count } });
+};
+
+const leaveRoom = async (io, socket, roomId, playerId) => {
   socket.leave(roomId);
-  const room = await Room.findOne({ roomId });
-  if (!room) {
-    return socket.emit("roomNotFound", { message: "Room not found" });
-  }
-  room.activePlayers = room.activePlayers - 1;
-  if (room.activePlayers === 0) {
-    room.status = "ended";
-    const rooms = await this.getActiveRooms();
-    io.emit(
-      "roomsUpdate",
-      rooms.filter((room) => room.roomId === roomId)
+
+  const count = getSocketCount(io, roomId);
+
+  const room = await Room.findOne({ roomId }).populate("players.player");
+  if (!room) return;
+
+  // Remove the player from the room's players array (lobby only)
+  if (playerId && room.status === "waiting") {
+    room.players = room.players.filter(
+      (p) => p.player._id.toString() !== playerId
     );
   }
-  await room.save();
-  return;
+
+  room.activePlayers = count;
+
+  if (count === 0) {
+    room.status = "ended";
+    await room.save();
+    const rooms = await getActiveRooms();
+    io.emit("roomsUpdate", rooms);
+  } else {
+    await room.save();
+    // Notify remaining players so their UI updates
+    io.to(roomId).emit("playerLeft", room);
+  }
 };
 
-exports.publicRoom = async (io, socket, { roomId, isPublic }) => {
+const publicRoom = async (io, socket, { roomId, isPublic }) => {
   try {
     const room = await Room.findOneAndUpdate(
       { roomId },
@@ -55,7 +65,7 @@ exports.publicRoom = async (io, socket, { roomId, isPublic }) => {
       return socket.emit("roomNotFound", { message: "Room not found" });
     }
     socket.emit("roomUpdated", room);
-    const rooms = await this.getActiveRooms();
+    const rooms = await getActiveRooms();
     io.emit("roomsUpdate", rooms);
     return;
   } catch (error) {
@@ -63,3 +73,5 @@ exports.publicRoom = async (io, socket, { roomId, isPublic }) => {
     throw error;
   }
 };
+
+module.exports = { getActiveRooms, joinRoom, leaveRoom, publicRoom };

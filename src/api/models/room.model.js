@@ -34,6 +34,11 @@ const RoomSchema = new mongoose.Schema(
     al3omdaTargets: [{ player: { type: String }, target: { type: String } }],
     damazeenTargets: [{ player: { type: String }, target: { type: String } }],
     damazeenProtection: { type: Boolean, default: false },
+    damazeenAttackUsedBy: [{ type: String }],
+    damazeenProtectUsedBy: [{ type: String }],
+    lastAl3omdaTargets: { type: Map, of: String, default: {} },
+    sitAlwada3Targets: [{ player: { type: String }, target: { type: String } }],
+    abuJanzeerTargets: [{ player: { type: String }, target: { type: String } }],
   },
   { timestamps: true }
 );
