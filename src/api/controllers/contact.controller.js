@@ -13,6 +13,34 @@ exports.submitContact = async (req, res) => {
       playerName: playerName || "Anonymous",
       subject,
       message,
+      source: "app",
+    });
+
+    res.status(201).json({ success: true, data: { contact } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.submitLandingContact = async (req, res) => {
+  try {
+    const { name, email, phone, message } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ success: false, message: "Message is required" });
+    }
+
+    if (!email && !phone) {
+      return res.status(400).json({ success: false, message: "Email or phone is required" });
+    }
+
+    const contact = await Contact.create({
+      playerName: name || "زائر الموقع",
+      email: email || null,
+      phone: phone || null,
+      subject: "رسالة من الموقع",
+      message,
+      source: "landing",
     });
 
     res.status(201).json({ success: true, data: { contact } });
@@ -26,9 +54,12 @@ exports.getContacts = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const status = req.query.status;
+    const source = req.query.source;
     const skip = (page - 1) * limit;
 
-    const query = status ? { status } : {};
+    const query = {};
+    if (status) query.status = status;
+    if (source) query.source = source;
 
     const [contacts, total] = await Promise.all([
       Contact.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),

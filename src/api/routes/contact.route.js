@@ -4,6 +4,7 @@ const contactController = require("../controllers/contact.controller");
 
 // Public endpoints
 router.post("/", contactController.submitContact);
+router.post("/landing", contactController.submitLandingContact);
 router.get("/responses/:userId", contactController.getMyResponses);
 
 module.exports = router;
