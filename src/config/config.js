@@ -13,4 +13,6 @@ module.exports = {
     },
   },
   jwtSecret: process.env.JWT_SECRET,
+  livekitApiKey: process.env.LIVEKIT_API_KEY,
+  livekitApiSecret: process.env.LIVEKIT_API_SECRET,
 };

@@ -171,26 +171,6 @@ module.exports = (server) => {
     socket.on("skipDiscussion", (arg) => skipDiscussionVote(io, socket, arg));
     //............................................................
 
-    //----------------------------------------------------------------
-    //audio streams
-    socket.on("offer", ({ roomId, offer, target }) => {
-      console.log("offer");
-      socket.to(roomId).emit("offer", { offer, senderId: socket.id });
-    });
-
-    socket.on("answer", ({ roomId, answer, target }) => {
-      socket.to(roomId).emit("answer", { answer });
-    });
-
-    socket.on("ice-candidate", ({ roomId, candidate, target }) => {
-      console.log("ice");
-      socket.to(roomId).emit("ice-candidate", { candidate });
-    });
-
-    socket.on("speaking-state", ({ roomId, playerId, isSpeaking }) => {
-      socket.to(roomId).emit("speaking-update", { playerId, isSpeaking });
-    });
-    //................................................................
   });
 
   return io;

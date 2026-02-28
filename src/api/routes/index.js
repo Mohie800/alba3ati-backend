@@ -9,5 +9,6 @@ router.use("/contact", require("./contact.route"));
 router.use("/notifications", require("./notification.route"));
 router.use("/reports", require("./report.route"));
 router.use("/app", require("./app.route"));
+router.use("/livekit", require("./livekit.route"));
 
 module.exports = router;

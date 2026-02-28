@@ -19,6 +19,7 @@
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.3",
+    "livekit-server-sdk": "^2.15.0",
     "mongoose": "^8.9.5",
     "socket.io": "^4.8.1",
     "uuid": "^11.0.5"
