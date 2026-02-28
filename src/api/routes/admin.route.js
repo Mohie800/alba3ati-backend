@@ -7,6 +7,7 @@ const contactController = require("../controllers/contact.controller");
 const banController = require("../controllers/ban.controller");
 const reportController = require("../controllers/report.controller");
 const appSettingsController = require("../controllers/appSettings.controller");
+const notificationController = require("../controllers/notification.controller");
 
 // Public
 router.post("/login", adminController.login);
@@ -36,5 +37,9 @@ router.delete("/bans/:deviceId", adminAuth, banController.unbanDevice);
 // App Settings
 router.get("/app-settings", adminAuth, appSettingsController.getSettings);
 router.put("/app-settings", adminAuth, appSettingsController.updateSettings);
+
+// Notifications
+router.post("/notifications/send", adminAuth, notificationController.sendNotification);
+router.get("/notifications", adminAuth, notificationController.getNotifications);
 
 module.exports = router;

@@ -1,4 +1,5 @@
 const Contact = require("../models/contact.model");
+const { sendPushNotification } = require("../services/pushNotification.service");
 
 exports.submitContact = async (req, res) => {
   try {
@@ -118,6 +119,22 @@ exports.respondToContact = async (req, res) => {
 
     if (!contact) {
       return res.status(404).json({ success: false, message: "Contact not found" });
+    }
+
+    // Send push notification to the user who submitted the contact
+    if (contact.player) {
+      try {
+        await sendPushNotification({
+          title: "رد على رسالتك",
+          body: `تم الرد على رسالتك: "${contact.subject}"`,
+          data: { screen: "settings", contactId: contact._id.toString() },
+          userIds: [contact.player.toString()],
+          type: "contact_response",
+          sentBy: req.admin.id,
+        });
+      } catch (notifErr) {
+        console.error("Contact response notification error:", notifErr);
+      }
     }
 
     res.json({ success: true, data: { contact } });
