@@ -1,6 +1,7 @@
 const Room = require("../models/room.model");
 const { startTimer, cancelTimer } = require("./timer.game");
 const { VOTE_TIME } = require("../../utils/constants");
+const { isPlayerInGracePeriod } = require("./disconnect.game");
 
 // In-memory store for skip votes per room
 const skipVotes = new Map(); // roomId -> Set of playerIds
@@ -21,7 +22,12 @@ exports.skipDiscussionVote = async (io, socket, { roomId, playerId }) => {
     const votes = skipVotes.get(roomId);
     votes.add(playerId);
 
-    const aliveCount = room.players.filter((p) => p.status === "alive").length;
+    // Exclude disconnected (grace period) players from alive count
+    const aliveCount = room.players.filter(
+      (p) =>
+        p.status === "alive" &&
+        !isPlayerInGracePeriod(p.player._id.toString())
+    ).length;
     const skipCount = votes.size;
 
     // Broadcast updated skip vote count
@@ -49,4 +55,11 @@ exports.skipDiscussionVote = async (io, socket, { roomId, playerId }) => {
 
 exports.clearSkipVotes = (roomId) => {
   skipVotes.delete(roomId);
+};
+
+exports.removePlayerSkipVote = (roomId, playerId) => {
+  const votes = skipVotes.get(roomId);
+  if (votes) {
+    votes.delete(playerId);
+  }
 };

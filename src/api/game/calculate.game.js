@@ -88,7 +88,7 @@ module.exports.claculateResult = async (io, roomId) => {
     io.to(roomId).emit("timeout", { room, newlyDead, abuJanzeerDead });
     cancelTimer(roomId);
     io.to(roomId).emit("stopTimer");
-    setTimeout(() => nightResults(io, roomId), 3000);
+    setTimeout(() => nightResults(io, roomId), 8000);
 
     return room; // Return the updated room
   } catch (error) {

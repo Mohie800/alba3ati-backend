@@ -8,6 +8,8 @@ const banController = require("../controllers/ban.controller");
 const reportController = require("../controllers/report.controller");
 const appSettingsController = require("../controllers/appSettings.controller");
 const notificationController = require("../controllers/notification.controller");
+const adController = require("../controllers/ad.controller");
+const upload = require("../middleware/upload");
 
 // Public
 router.post("/login", adminController.login);
@@ -41,5 +43,11 @@ router.put("/app-settings", adminAuth, appSettingsController.updateSettings);
 // Notifications
 router.post("/notifications/send", adminAuth, notificationController.sendNotification);
 router.get("/notifications", adminAuth, notificationController.getNotifications);
+
+// Ads
+router.post("/ads", adminAuth, upload.single("image"), adController.createAd);
+router.get("/ads", adminAuth, adController.getAds);
+router.put("/ads/:id", adminAuth, upload.single("image"), adController.updateAd);
+router.delete("/ads/:id", adminAuth, adController.deleteAd);
 
 module.exports = router;

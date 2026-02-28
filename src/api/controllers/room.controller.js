@@ -1,4 +1,9 @@
 const Room = require("../models/room.model");
+const {
+  startGracePeriod,
+  clearAllGracePeriodsForRoom,
+} = require("../game/disconnect.game");
+const { cancelTimer } = require("../game/timer.game");
 
 const getActiveRooms = async () => {
   try {
@@ -33,22 +38,43 @@ const leaveRoom = async (io, socket, roomId, playerId) => {
   const room = await Room.findOne({ roomId }).populate("players.player");
   if (!room) return;
 
-  // Remove the player from the room's players array (lobby only)
-  if (playerId && room.status === "waiting") {
-    room.players = room.players.filter(
-      (p) => p.player._id.toString() !== playerId
-    );
+  let hostMigrated = false;
+
+  if (room.status === "waiting") {
+    // Lobby: remove player from the room
+    if (playerId) {
+      const wasHost = room.host === playerId;
+      room.players = room.players.filter(
+        (p) => p.player._id.toString() !== playerId
+      );
+
+      // Host migration: if the leaving player is the host, transfer to next player
+      if (wasHost && room.players.length > 0) {
+        room.host = room.players[0].player._id.toString();
+        hostMigrated = true;
+      }
+    }
+  } else if (room.status === "playing" && playerId) {
+    // Mid-game: start grace period instead of removing player
+    startGracePeriod(io, roomId, playerId);
   }
 
   room.activePlayers = count;
 
   if (count === 0) {
+    clearAllGracePeriodsForRoom(roomId);
+    cancelTimer(roomId);
     room.status = "ended";
     await room.save();
     const rooms = await getActiveRooms();
     io.emit("roomsUpdate", rooms);
   } else {
     await room.save();
+
+    if (hostMigrated) {
+      io.to(roomId).emit("hostMigrated", { newHostId: room.host, room });
+    }
+
     // Notify remaining players so their UI updates
     io.to(roomId).emit("playerLeft", room);
   }

@@ -6,6 +6,7 @@ exports.ROLES = [
   { id: "5", name: "ابو جنزير", color: "#F1C40F" },
 ];
 
-exports.ROUND_TIME = 500;
+exports.ROUND_TIME = 250;
 exports.DIS_DUE = 10;
 exports.VOTE_TIME = 30;
+exports.GRACE_PERIOD = 30;

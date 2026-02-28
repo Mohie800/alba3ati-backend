@@ -9,6 +9,9 @@ router.post("/register", authController.register);
 // GET /api/auth/check-ban?deviceId=xxx
 router.get("/check-ban", authController.checkBan);
 
+// DELETE /api/auth/delete-account
+router.delete("/delete-account", authController.deleteAccount);
+
 // POST /api/auth/push-token
 router.post("/push-token", notificationController.savePushToken);
 

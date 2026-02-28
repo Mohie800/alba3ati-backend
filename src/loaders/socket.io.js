@@ -22,6 +22,10 @@ const {
   leaveRoom,
   publicRoom,
 } = require("../api/controllers/room.controller");
+const {
+  cancelGracePeriod,
+  isPlayerInGracePeriod,
+} = require("../api/game/disconnect.game");
 const initChat = require("../api/services/chat.service");
 
 module.exports = (server) => {
@@ -103,9 +107,38 @@ module.exports = (server) => {
 
         let updatedRoom;
         if (alreadyInRoom) {
+          // Cancel grace period if player was disconnected
+          if (isPlayerInGracePeriod(player)) {
+            cancelGracePeriod(io, roomId, player);
+          }
+
           // Rejoin socket room without adding duplicate player entry
           updatedRoom = room;
+
+          joinRoom(io, socket, roomId);
+          socket.gameRoomId = roomId;
+          socket.playerId = player;
+
+          if (room.status === "playing") {
+            // Mid-game rejoin: send gameReconnected so frontend restores game state
+            const me = room.players.find(
+              (p) => p.player._id.toString() === player
+            );
+            socket.emit("gameReconnected", {
+              room: updatedRoom,
+              roleId: me ? me.roleId : null,
+            });
+          } else {
+            socket.emit("roomJoined", updatedRoom);
+          }
+          io.to(roomId).emit("playerJoined", updatedRoom);
         } else {
+          // Block new players from joining a game in progress
+          if (room.status !== "waiting") {
+            socket.emit("joinError", { message: "Game already in progress" });
+            return;
+          }
+
           if (room.players.length >= 15) {
             socket.emit("joinError", { message: "Room is full" });
             return;
@@ -116,14 +149,14 @@ module.exports = (server) => {
             { $push: { players: { player } } },
             { new: true }
           ).populate("players.player");
+
+          joinRoom(io, socket, roomId);
+          socket.gameRoomId = roomId;
+          socket.playerId = player;
+
+          socket.emit("roomJoined", updatedRoom);
+          io.to(roomId).emit("playerJoined", updatedRoom);
         }
-
-        joinRoom(io, socket, roomId);
-        socket.gameRoomId = roomId;
-        socket.playerId = player;
-
-        socket.emit("roomJoined", updatedRoom);
-        io.to(roomId).emit("playerJoined", updatedRoom);
       } catch (error) {
         socket.emit("joinError", { message: "Failed to join room" });
       }
