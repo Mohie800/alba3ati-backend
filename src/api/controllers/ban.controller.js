@@ -1,25 +1,57 @@
 const BannedDevice = require("../models/bannedDevice.model");
 
+const normalizeDeviceId = (id) => id.trim().toLowerCase();
+
+const isValidDeviceId = (id) => {
+  if (typeof id !== "string") return false;
+  const trimmed = id.trim();
+  return trimmed.length >= 8 && trimmed.length <= 255;
+};
+
 exports.banDevice = async (req, res) => {
   try {
-    const { deviceId, reason } = req.body;
+    const { deviceId, reason, expiresAt } = req.body;
 
     if (!deviceId) {
       return res.status(400).json({ success: false, message: "deviceId is required" });
     }
 
-    const existing = await BannedDevice.findOne({ deviceId });
+    if (!isValidDeviceId(deviceId)) {
+      return res.status(400).json({ success: false, message: "Invalid deviceId format (must be 8-255 characters)" });
+    }
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ success: false, message: "reason is required" });
+    }
+
+    if (expiresAt && isNaN(Date.parse(expiresAt))) {
+      return res.status(400).json({ success: false, message: "Invalid expiresAt date" });
+    }
+
+    const normalized = normalizeDeviceId(deviceId);
+
+    // Use findOneAndUpdate with upsert to avoid race condition between findOne and create
+    const existing = await BannedDevice.findOne({ deviceId: normalized });
     if (existing) {
       return res.status(409).json({ success: false, message: "Device is already banned" });
     }
 
-    const ban = await BannedDevice.create({
-      deviceId,
-      reason: reason || "",
-      bannedBy: req.admin.id,
-    });
+    try {
+      const ban = await BannedDevice.create({
+        deviceId: normalized,
+        reason: reason.trim(),
+        bannedBy: req.admin.id,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+      });
 
-    res.status(201).json({ success: true, data: { ban } });
+      res.status(201).json({ success: true, data: { ban } });
+    } catch (err) {
+      // Handle race condition: if another request created the ban between our check and create
+      if (err.code === 11000) {
+        return res.status(409).json({ success: false, message: "Device is already banned" });
+      }
+      throw err;
+    }
   } catch (err) {
     console.error("Ban device error:", err);
     res.status(500).json({ success: false, message: "Server error" });
@@ -29,7 +61,7 @@ exports.banDevice = async (req, res) => {
 exports.listBans = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const skip = (page - 1) * limit;
 
     const [bans, total] = await Promise.all([
@@ -58,12 +90,23 @@ exports.listBans = async (req, res) => {
 
 exports.checkDevice = async (req, res) => {
   try {
-    const ban = await BannedDevice.findOne({ deviceId: req.params.deviceId }).populate(
+    const rawId = req.params.deviceId;
+    if (!rawId || !isValidDeviceId(rawId)) {
+      return res.status(400).json({ success: false, message: "Invalid deviceId" });
+    }
+
+    const ban = await BannedDevice.findOne({ deviceId: normalizeDeviceId(rawId) }).populate(
       "bannedBy",
       "username"
     );
 
     if (!ban) {
+      return res.json({ success: true, data: { banned: false } });
+    }
+
+    // Check if ban has expired
+    if (ban.expiresAt && ban.expiresAt < new Date()) {
+      await BannedDevice.deleteOne({ _id: ban._id });
       return res.json({ success: true, data: { banned: false } });
     }
 
@@ -76,10 +119,15 @@ exports.checkDevice = async (req, res) => {
 
 exports.unbanDevice = async (req, res) => {
   try {
-    const result = await BannedDevice.findOneAndDelete({ deviceId: req.params.deviceId });
+    const rawId = req.params.deviceId;
+    if (!rawId || !isValidDeviceId(rawId)) {
+      return res.status(400).json({ success: false, message: "Invalid deviceId" });
+    }
+
+    const result = await BannedDevice.findOneAndDelete({ deviceId: normalizeDeviceId(rawId) });
 
     if (!result) {
-      return res.status(404).json({ success: false, message: "Ban not found" });
+      return res.status(404).json({ success: false, message: "Ban not found for this device" });
     }
 
     res.json({ success: true, message: "Device unbanned" });

@@ -2,6 +2,8 @@ const User = require("../models/user.model");
 const BannedDevice = require("../models/bannedDevice.model");
 const config = require("../../config/config");
 
+const normalizeDeviceId = (id) => (id ? id.trim().toLowerCase() : null);
+
 exports.register = async (req, res) => {
   try {
     const { name, deviceId } = req.body;
@@ -15,15 +17,21 @@ exports.register = async (req, res) => {
     }
 
     // Check if device is banned
-    if (deviceId) {
-      const banned = await BannedDevice.findOne({ deviceId });
+    const normalizedDeviceId = normalizeDeviceId(deviceId);
+    if (normalizedDeviceId) {
+      const banned = await BannedDevice.findOne({ deviceId: normalizedDeviceId });
       if (banned) {
-        return res.status(403).json({
-          success: false,
-          code: "DEVICE_BANNED",
-          error: "This device has been banned",
-          reason: banned.reason,
-        });
+        // Check if ban has expired
+        if (banned.expiresAt && banned.expiresAt < new Date()) {
+          await BannedDevice.deleteOne({ _id: banned._id });
+        } else {
+          return res.status(403).json({
+            success: false,
+            code: "DEVICE_BANNED",
+            error: "This device has been banned",
+            reason: banned.reason,
+          });
+        }
       }
     }
 
@@ -67,7 +75,12 @@ exports.checkBan = async (req, res) => {
       return res.status(400).json({ success: false, error: "deviceId is required" });
     }
 
-    const banned = await BannedDevice.findOne({ deviceId });
+    const banned = await BannedDevice.findOne({ deviceId: normalizeDeviceId(deviceId) });
+
+    if (banned && banned.expiresAt && banned.expiresAt < new Date()) {
+      await BannedDevice.deleteOne({ _id: banned._id });
+      return res.json({ success: true, data: { banned: false, reason: null } });
+    }
 
     res.json({
       success: true,

@@ -1,8 +1,14 @@
-const { Expo } = require("expo-server-sdk");
 const User = require("../models/user.model");
 const Notification = require("../models/notification.model");
 
-const expo = new Expo();
+let Expo, expo;
+async function getExpo() {
+  if (!expo) {
+    ({ Expo } = await import("expo-server-sdk"));
+    expo = new Expo();
+  }
+  return { Expo, expo };
+}
 
 /**
  * Send push notifications to users and create a notification record.
@@ -15,6 +21,8 @@ const expo = new Expo();
  * @param {string} [params.sentBy] - Admin ID
  */
 async function sendPushNotification({ title, body, data = {}, userIds, type = "broadcast", sentBy = null }) {
+  const { Expo, expo } = await getExpo();
+
   // Build query for users with valid push tokens
   const query = { expoPushToken: { $ne: null } };
   if (userIds && userIds.length > 0) {
