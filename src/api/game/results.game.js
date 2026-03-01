@@ -24,14 +24,23 @@ module.exports.nightResults = async (io, roomId, voted) => {
     await room.save();
     const ba3atiCount = alivePlayers.filter((p) => p.roleId === "1").length;
     const abuJanzeerCount = alivePlayers.filter((p) => p.roleId === "5").length;
-    const villagersCount = alivePlayers.filter((p) => p.roleId !== "1" && p.roleId !== "5").length;
+    const villagersCount = alivePlayers.filter(
+      (p) => p.roleId !== "1" && p.roleId !== "5",
+    ).length;
     if (alivePlayers.length === 1 && abuJanzeerCount === 1) {
       // abu janzeer wins 3
       io.to(roomId).emit("gameOver", { room, win: "3" });
-    } else if (ba3atiCount > 0 && ba3atiCount >= villagersCount + abuJanzeerCount) {
+    } else if (
+      ba3atiCount > 0 &&
+      ba3atiCount > villagersCount + abuJanzeerCount
+    ) {
       // ba3ati wins 1
       io.to(roomId).emit("gameOver", { room, win: "1" });
-    } else if (villagersCount > 0 && ba3atiCount === 0 && abuJanzeerCount === 0) {
+    } else if (
+      villagersCount > 0 &&
+      ba3atiCount === 0 &&
+      abuJanzeerCount === 0
+    ) {
       // villagers win 2
       io.to(roomId).emit("gameOver", { room, win: "2" });
     } else if (alivePlayers.length === 0) {
