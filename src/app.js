@@ -12,7 +12,8 @@ const startServer = async () => {
   // Loaders
   expressLoader(app);
   await mongooseLoader();
-  socketioLoader(server);
+  const io = socketioLoader(server);
+  app.set("io", io);
 
   // Routes
   app.use("/api", require("./api/routes"));

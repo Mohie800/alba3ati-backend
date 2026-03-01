@@ -35,6 +35,9 @@ exports.getDashboardStats = async (req, res) => {
     const activeConnections =
       activeConnectionsResult.length > 0 ? activeConnectionsResult[0].total : 0;
 
+    const io = req.app.get("io");
+    const onlinePlayers = io ? io.engine.clientsCount : 0;
+
     res.json({
       success: true,
       data: {
@@ -44,6 +47,7 @@ exports.getDashboardStats = async (req, res) => {
         activeGames,
         activeRooms,
         activeConnections,
+        onlinePlayers,
         newContacts,
         pendingReports,
       },
