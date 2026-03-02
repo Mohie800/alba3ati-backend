@@ -14,8 +14,9 @@ const {
   abuJanzeerAction,
   skipNightAction,
 } = require("../api/game/room.actions");
-const { voteSubmit } = require("../api/game/votes.game");
+const { voteSubmit, voteSkip } = require("../api/game/votes.game");
 const { skipDiscussionVote } = require("../api/game/skipDiscussion.game");
+const { getRemainingTime } = require("../api/game/timer.game");
 const {
   getActiveRooms,
   joinRoom,
@@ -25,8 +26,11 @@ const {
 const {
   cancelGracePeriod,
   isPlayerInGracePeriod,
+  cancelWaitingGracePeriod,
+  isPlayerInWaitingGracePeriod,
 } = require("../api/game/disconnect.game");
 const initChat = require("../api/services/chat.service");
+const AppSettings = require("../api/models/appSettings.model");
 
 module.exports = (server) => {
   const io = SocketIO(server, {
@@ -55,6 +59,13 @@ module.exports = (server) => {
     // Handle room creation
     socket.on("createRoom", async (host) => {
       try {
+        // Check maintenance mode
+        const appSettings = await AppSettings.getSettings();
+        if (appSettings.maintenanceMode) {
+          socket.emit("maintenanceMode", { message: appSettings.maintenanceMessage });
+          return;
+        }
+
         const roomId = getRandomString();
 
         // Create a new room
@@ -105,11 +116,23 @@ module.exports = (server) => {
           (p) => p.player._id.toString() === player
         );
 
+        // Check maintenance mode (allow reconnects to pass through)
+        if (!alreadyInRoom) {
+          const appSettings = await AppSettings.getSettings();
+          if (appSettings.maintenanceMode) {
+            socket.emit("maintenanceMode", { message: appSettings.maintenanceMessage });
+            return;
+          }
+        }
+
         let updatedRoom;
         if (alreadyInRoom) {
-          // Cancel grace period if player was disconnected
+          // Cancel grace periods if player was disconnected
           if (isPlayerInGracePeriod(player)) {
             cancelGracePeriod(io, roomId, player);
+          }
+          if (isPlayerInWaitingGracePeriod(player)) {
+            cancelWaitingGracePeriod(roomId, player);
           }
 
           // Rejoin socket room without adding duplicate player entry
@@ -127,19 +150,26 @@ module.exports = (server) => {
             socket.emit("gameReconnected", {
               room: updatedRoom,
               roleId: me ? me.roleId : null,
+              gamePhase: updatedRoom.gamePhase || "night",
+              timer: getRemainingTime(roomId),
+              gameResult: updatedRoom.gameResult || null,
             });
           } else {
             socket.emit("roomJoined", updatedRoom);
           }
           io.to(roomId).emit("playerJoined", updatedRoom);
         } else {
-          // Block new players from joining a game in progress
+          // Block new players from joining a non-waiting room
+          if (room.status === "ended") {
+            socket.emit("joinError", { message: "Game has ended" });
+            return;
+          }
           if (room.status !== "waiting") {
-            socket.emit("joinError", { message: "Game already in progress" });
+            socket.emit("joinError", { message: "Game already started" });
             return;
           }
 
-          if (room.players.length >= 15) {
+          if (room.players.length >= 20) {
             socket.emit("joinError", { message: "Room is full" });
             return;
           }
@@ -165,7 +195,7 @@ module.exports = (server) => {
     socket.on("disconnect", () => {
       console.log("Client disconnected");
       if (socket.gameRoomId) {
-        leaveRoom(io, socket, socket.gameRoomId, socket.playerId);
+        leaveRoom(io, socket, socket.gameRoomId, socket.playerId, false);
         socket.gameRoomId = null;
         socket.playerId = null;
       }
@@ -173,7 +203,7 @@ module.exports = (server) => {
 
     socket.on("home", () => {
       if (socket.gameRoomId) {
-        leaveRoom(io, socket, socket.gameRoomId, socket.playerId);
+        leaveRoom(io, socket, socket.gameRoomId, socket.playerId, true);
         socket.gameRoomId = null;
         socket.playerId = null;
       }
@@ -201,6 +231,7 @@ module.exports = (server) => {
     //----------------------------------------------------------------
     //votes
     socket.on("vote", (arg) => voteSubmit(io, socket, arg));
+    socket.on("skipVote", (arg) => voteSkip(io, socket, arg));
     socket.on("skipDiscussion", (arg) => skipDiscussionVote(io, socket, arg));
     //............................................................
 

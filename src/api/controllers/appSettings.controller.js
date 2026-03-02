@@ -6,13 +6,20 @@ exports.checkUpdate = async (req, res) => {
     const { version } = req.query;
     const settings = await AppSettings.getSettings();
 
+    const response = {
+      forceUpdate: false,
+      maintenanceMode: settings.maintenanceMode,
+      maintenanceMessage: settings.maintenanceMessage,
+    };
+
     if (!settings.forceUpdate || !version) {
-      return res.json({ forceUpdate: false });
+      return res.json(response);
     }
 
     const needsUpdate = compareVersions(version, settings.minVersion) < 0;
 
     return res.json({
+      ...response,
       forceUpdate: needsUpdate,
       minVersion: settings.minVersion,
       updateMessage: settings.updateMessage,
@@ -40,7 +47,7 @@ exports.getSettings = async (req, res) => {
 // Admin: update settings
 exports.updateSettings = async (req, res) => {
   try {
-    const { forceUpdate, minVersion, updateMessage, playStoreUrl, appStoreUrl } = req.body;
+    const { forceUpdate, minVersion, updateMessage, playStoreUrl, appStoreUrl, maintenanceMode, maintenanceMessage } = req.body;
     const settings = await AppSettings.getSettings();
 
     if (typeof forceUpdate === "boolean") settings.forceUpdate = forceUpdate;
@@ -48,6 +55,8 @@ exports.updateSettings = async (req, res) => {
     if (typeof updateMessage === "string") settings.updateMessage = updateMessage;
     if (typeof playStoreUrl === "string") settings.playStoreUrl = playStoreUrl;
     if (typeof appStoreUrl === "string") settings.appStoreUrl = appStoreUrl;
+    if (typeof maintenanceMode === "boolean") settings.maintenanceMode = maintenanceMode;
+    if (typeof maintenanceMessage === "string") settings.maintenanceMessage = maintenanceMessage;
 
     await settings.save();
     return res.json({ data: settings });

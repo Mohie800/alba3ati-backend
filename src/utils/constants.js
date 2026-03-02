@@ -9,4 +9,4 @@ exports.ROLES = [
 exports.ROUND_TIME = 250;
 exports.DIS_DUE = 10;
 exports.VOTE_TIME = 30;
-exports.GRACE_PERIOD = 30;
+exports.GRACE_PERIOD = 60;

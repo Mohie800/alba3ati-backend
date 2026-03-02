@@ -2,6 +2,7 @@ const Room = require("../models/room.model");
 const {
   startGracePeriod,
   clearAllGracePeriodsForRoom,
+  startWaitingGracePeriod,
 } = require("../game/disconnect.game");
 const { cancelTimer } = require("../game/timer.game");
 
@@ -30,7 +31,7 @@ const joinRoom = async (io, socket, roomId) => {
   await Room.updateOne({ roomId }, { $set: { activePlayers: count } });
 };
 
-const leaveRoom = async (io, socket, roomId, playerId) => {
+const leaveRoom = async (io, socket, roomId, playerId, intentional = false) => {
   socket.leave(roomId);
 
   const count = getSocketCount(io, roomId);
@@ -41,7 +42,15 @@ const leaveRoom = async (io, socket, roomId, playerId) => {
   let hostMigrated = false;
 
   if (room.status === "waiting") {
-    // Lobby: remove player from the room
+    if (playerId && !intentional) {
+      // Unintentional disconnect: give the player time to reconnect
+      startWaitingGracePeriod(io, roomId, playerId);
+      room.activePlayers = count;
+      await room.save();
+      return;
+    }
+
+    // Intentional leave: remove player immediately
     if (playerId) {
       const wasHost = room.host === playerId;
       room.players = room.players.filter(

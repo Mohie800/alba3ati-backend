@@ -26,6 +26,7 @@ exports.assignRoles = async (
     });
 
     // Update room with assignments
+    room.gamePhase = "night";
     await room.save();
     startTimer(io, ROUND_TIME, roomId, "timerEnd", claculateResult);
 

@@ -8,6 +8,11 @@ const { clearSkipVotes } = require("./skipDiscussion.game");
 // Start a separate voting timer instead of counting votes immediately
 const startVotingPhase = async (io, roomId) => {
   clearSkipVotes(roomId);
+  const room = await Room.findOne({ roomId });
+  if (room) {
+    room.gamePhase = "voting";
+    await room.save();
+  }
   startTimer(io, VOTE_TIME, roomId, "votingTimeUp", claculateVoteResult);
 };
 
@@ -29,12 +34,18 @@ module.exports.nightResults = async (io, roomId, voted) => {
     ).length;
     if (alivePlayers.length === 1 && abuJanzeerCount === 1) {
       // abu janzeer wins 3
+      room.gamePhase = "gameOver";
+      room.gameResult = "3";
+      await room.save();
       io.to(roomId).emit("gameOver", { room, win: "3" });
     } else if (
       ba3atiCount > 0 &&
       ba3atiCount > villagersCount + abuJanzeerCount
     ) {
       // ba3ati wins 1
+      room.gamePhase = "gameOver";
+      room.gameResult = "1";
+      await room.save();
       io.to(roomId).emit("gameOver", { room, win: "1" });
     } else if (
       villagersCount > 0 &&
@@ -42,13 +53,21 @@ module.exports.nightResults = async (io, roomId, voted) => {
       abuJanzeerCount === 0
     ) {
       // villagers win 2
+      room.gamePhase = "gameOver";
+      room.gameResult = "2";
+      await room.save();
       io.to(roomId).emit("gameOver", { room, win: "2" });
     } else if (alivePlayers.length === 0) {
+      room.gamePhase = "gameOver";
+      room.gameResult = "0";
+      await room.save();
       io.to(roomId).emit("gameOver", { room, win: "0" });
       // draw 0
     } else {
       // continue to the next night with the updated room status and players' statuses
       if (voted) {
+        room.gamePhase = "night";
+        await room.save();
         io.to(roomId).emit("nextNight", room);
         startTimer(
           io,
@@ -58,6 +77,8 @@ module.exports.nightResults = async (io, roomId, voted) => {
           claculateResult.claculateResult,
         );
       } else {
+        room.gamePhase = "discussion";
+        await room.save();
         startTimer(
           io,
           room.discussionTime,

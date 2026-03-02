@@ -29,6 +29,7 @@ exports.claculateVoteResult = async (io, roomId) => {
   // Fetch the room
   const room = await Room.findOne({ roomId }).populate("players.player");
   if (!room) return null;
+  room.gamePhase = "voteResults";
   const voteCounts = {};
 
   room.votes.forEach((votedPlayerId) => {
@@ -45,6 +46,7 @@ exports.claculateVoteResult = async (io, roomId) => {
 
   if (isTie || potentialEliminated.length === 0) {
     // Emit a message to the room
+    await room.save();
     io.to(roomId).emit("vote-res", { room, eliminated: null });
   } else {
     const eliminatedPlayer = room.players.find(

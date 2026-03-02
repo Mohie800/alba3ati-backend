@@ -41,6 +41,8 @@ exports.skipDiscussionVote = async (io, socket, { roomId, playerId }) => {
     if (skipCount >= aliveCount) {
       cancelTimer(roomId);
       skipVotes.delete(roomId);
+      room.gamePhase = "voting";
+      await room.save();
       io.to(roomId).emit("timerEnds");
 
       // Start a voting timer so the game doesn't hang if not all players vote

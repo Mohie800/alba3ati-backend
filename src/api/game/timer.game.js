@@ -21,8 +21,10 @@ exports.startTimer = async (io, timeInSec, roomId, eventString, cb) => {
 
   // Create new timer
   const timer = {
+    remainingTime,
     intervalId: setInterval(async () => {
       remainingTime--;
+      timer.remainingTime = remainingTime;
 
       // Emit tick event to the room
       io.to(roomId).emit("tick", remainingTime);
@@ -59,5 +61,7 @@ exports.cancelTimer = (roomId) => {
   }
 };
 
-// Example usage:
-// startTimer(io, 60, 'room-123', 'timer-complete');
+exports.getRemainingTime = (roomId) => {
+  const timer = activeTimers.get(roomId);
+  return timer ? timer.remainingTime : 0;
+};

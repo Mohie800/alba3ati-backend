@@ -28,6 +28,8 @@ const RoomSchema = new mongoose.Schema(
     activePlayers: { type: Number, default: 0 },
     isPublic: { type: Boolean, default: false },
     discussionTime: { type: Number, default: 1 },
+    gamePhase: { type: String, default: "lobby" },
+    gameResult: { type: String, default: null },
 
     //actions
     ba3atiTargets: [{ player: { type: String }, target: { type: String } }],

@@ -11,11 +11,11 @@ exports.startGame = async (io, socket, { roomId }) => {
       socket.emit("startGameError", { message: "عدد اللاعبين غير كافي" });
       return;
     }
-    socket.emit("gameStarted");
     room.status = "playing";
     await room.save();
     const rooms = await getActiveRooms();
     io.emit("roomsUpdate", rooms);
+    io.to(roomId).emit("gameStarted");
   } catch (error) {
     console.log(error);
     return;

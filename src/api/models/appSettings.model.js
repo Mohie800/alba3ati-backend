@@ -7,6 +7,11 @@ const appSettingsSchema = new mongoose.Schema(
     updateMessage: { type: String, default: "يرجى تحديث التطبيق للاستمرار" },
     playStoreUrl: { type: String, default: "" },
     appStoreUrl: { type: String, default: "" },
+    maintenanceMode: { type: Boolean, default: false },
+    maintenanceMessage: {
+      type: String,
+      default: "اللعبة تحت الصيانة حالياً، يرجى المحاولة لاحقاً",
+    },
   },
   { timestamps: true }
 );

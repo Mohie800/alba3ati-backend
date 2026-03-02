@@ -84,6 +84,7 @@ module.exports.claculateResult = async (io, roomId) => {
     room.players.forEach((P) => {
       P.playStatus = "playing";
     });
+    room.gamePhase = "nightResults";
     await room.save();
     io.to(roomId).emit("timeout", { room, newlyDead, abuJanzeerDead });
     cancelTimer(roomId);

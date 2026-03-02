@@ -27,3 +27,29 @@ exports.voteSubmit = async (io, socket, { roomId, targetId, playerId }) => {
   }
   return;
 };
+
+exports.voteSkip = async (io, socket, { roomId, playerId }) => {
+  // Mark player as done without casting a vote
+  const updated = await Room.findOneAndUpdate(
+    {
+      roomId,
+      players: {
+        $elemMatch: { player: playerId, playStatus: "playing", status: "alive" },
+      },
+    },
+    {
+      $set: { "players.$.playStatus": "done" },
+    },
+    { new: true }
+  ).populate("players.player");
+  if (!updated) return;
+
+  const notDone = updated.players.find(
+    (p) => p.playStatus === "playing" && p.status === "alive"
+  );
+  io.to(roomId).emit("playerVoted", updated);
+  if (!notDone) {
+    claculateVoteResult(io, roomId);
+  }
+  return;
+};

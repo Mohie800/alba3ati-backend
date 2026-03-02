@@ -4,6 +4,9 @@ const { GRACE_PERIOD } = require("../../utils/constants");
 // In-memory store: playerId -> { timerId, roomId }
 const gracePeriods = new Map();
 
+// Waiting-room grace periods: playerId -> { timerId, roomId }
+const waitingGracePeriods = new Map();
+
 /**
  * Start a 30s grace period for a disconnected player.
  * Emits `playerDisconnected` so other clients can show a badge.
@@ -122,6 +125,99 @@ const clearAllGracePeriodsForRoom = (roomId) => {
       gracePeriods.delete(playerId);
     }
   }
+  for (const [playerId, entry] of waitingGracePeriods.entries()) {
+    if (entry.roomId === roomId) {
+      clearTimeout(entry.timerId);
+      waitingGracePeriods.delete(playerId);
+    }
+  }
+};
+
+// ---- Waiting-room grace period (lobby disconnect) ----
+
+const WAITING_GRACE_PERIOD = 15; // seconds
+
+const startWaitingGracePeriod = (io, roomId, playerId) => {
+  if (waitingGracePeriods.has(playerId)) return;
+
+  const timerId = setTimeout(() => {
+    handleWaitingGracePeriodExpiry(io, roomId, playerId);
+  }, WAITING_GRACE_PERIOD * 1000);
+
+  waitingGracePeriods.set(playerId, { timerId, roomId });
+  console.log(
+    `[Disconnect] Waiting grace period started for ${playerId} in room ${roomId}`
+  );
+};
+
+const cancelWaitingGracePeriod = (roomId, playerId) => {
+  const entry = waitingGracePeriods.get(playerId);
+  if (!entry) return;
+
+  clearTimeout(entry.timerId);
+  waitingGracePeriods.delete(playerId);
+  console.log(
+    `[Disconnect] Waiting grace period canceled for ${playerId} in room ${roomId}`
+  );
+};
+
+const isPlayerInWaitingGracePeriod = (playerId) => {
+  return waitingGracePeriods.has(playerId);
+};
+
+const handleWaitingGracePeriodExpiry = async (io, roomId, playerId) => {
+  waitingGracePeriods.delete(playerId);
+
+  try {
+    const room = await Room.findOne({ roomId }).populate("players.player");
+    if (!room || room.status !== "waiting") return;
+
+    const wasHost = room.host === playerId;
+
+    // Remove the player
+    room.players = room.players.filter(
+      (p) => p.player._id.toString() !== playerId
+    );
+
+    if (room.players.length === 0) {
+      // No players left — end the room
+      clearAllGracePeriodsForRoom(roomId);
+      const { cancelTimer } = require("../game/timer.game");
+      cancelTimer(roomId);
+      room.status = "ended";
+      await room.save();
+      const activeRooms = await Room.find({
+        status: "waiting",
+        isPublic: true,
+      }).populate("players.player");
+      io.emit("roomsUpdate", activeRooms);
+    } else {
+      // Host migration if needed
+      if (wasHost) {
+        room.host = room.players[0].player._id.toString();
+        io.to(roomId).emit("hostMigrated", {
+          newHostId: room.host,
+          room,
+        });
+      }
+      await room.save();
+      io.to(roomId).emit("playerLeft", room);
+      const activeRooms = await Room.find({
+        status: "waiting",
+        isPublic: true,
+      }).populate("players.player");
+      io.emit("roomsUpdate", activeRooms);
+    }
+
+    console.log(
+      `[Disconnect] Waiting grace period expired for ${playerId} — removed from room ${roomId}`
+    );
+  } catch (error) {
+    console.error(
+      "[Disconnect] Error handling waiting grace period expiry:",
+      error
+    );
+  }
 };
 
 module.exports = {
@@ -130,4 +226,7 @@ module.exports = {
   handleGracePeriodExpiry,
   isPlayerInGracePeriod,
   clearAllGracePeriodsForRoom,
+  startWaitingGracePeriod,
+  cancelWaitingGracePeriod,
+  isPlayerInWaitingGracePeriod,
 };
