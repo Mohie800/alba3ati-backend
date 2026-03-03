@@ -5,13 +5,14 @@ const { startTimer } = require("./timer.game");
 exports.assignRoles = async (
   io,
   socket,
-  { roomId, distribution, discussionTime }
+  { roomId, distribution, discussionTime, votesVisible }
 ) => {
   try {
     const room = await Room.findOne({ roomId }).populate("players.player");
     if (!room) return;
 
     room.discussionTime = discussionTime * 60;
+    room.votesVisible = votesVisible;
     // Create role array based on distribution
     const rolePool = [];
     Object.entries(distribution).forEach(([roleId, count]) => {
