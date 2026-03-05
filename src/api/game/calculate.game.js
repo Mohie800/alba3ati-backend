@@ -62,7 +62,6 @@ module.exports.claculateResult = async (io, roomId) => {
       ballahKills.push({
         victimId: entry.target,
         victimName: victim.player.name,
-        victimRoleId: victim.roleId,
         killerId: entry.player,
         killerName: killer?.player.name || "???",
       });
