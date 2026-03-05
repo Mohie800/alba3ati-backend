@@ -235,6 +235,44 @@ exports.abuJanzeerAction = async (io, socket, { roomId, targetId, playerId }) =>
     return;
   }
 };
+exports.ballahAction = async (io, socket, { roomId, targetId, playerId }) => {
+  try {
+    const room = await Room.findOne({ roomId }).populate("players.player");
+    if (!room) return;
+
+    // Ballah can only kill once per game
+    if (room.ballahAttackUsedBy.includes(playerId)) {
+      socket.emit("actionError", { message: "لقد استخدمت السيف بالفعل" });
+      return;
+    }
+
+    // Validate target is alive and in the room
+    const targetPlayer = room.players.find(
+      (p) => p.player._id.toString() === targetId
+    );
+    if (!targetPlayer || targetPlayer.status !== "alive") return;
+
+    // Atomically update player status and push targets
+    const updated = await Room.findOneAndUpdate(
+      playerElemMatch(roomId, playerId),
+      {
+        $set: { "players.$.playStatus": "done", "players.$.target": targetId },
+        $push: {
+          ballahTargets: { player: playerId, target: targetId },
+          ballahAttackUsedBy: playerId,
+        },
+      },
+      { new: true }
+    );
+    if (!updated) return;
+
+    await resoveAction(roomId, io, socket);
+    return;
+  } catch (error) {
+    console.log(error);
+    return;
+  }
+};
 exports.skipNightAction = async (io, socket, { roomId, playerId }) => {
   try {
     // Atomically mark player as done

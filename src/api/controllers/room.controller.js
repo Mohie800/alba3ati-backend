@@ -39,29 +39,40 @@ const leaveRoom = async (io, socket, roomId, playerId, intentional = false) => {
   const room = await Room.findOne({ roomId }).populate("players.player");
   if (!room) return;
 
-  let hostMigrated = false;
-
   if (room.status === "waiting") {
     if (playerId && !intentional) {
       // Unintentional disconnect: give the player time to reconnect
       startWaitingGracePeriod(io, roomId, playerId);
       room.activePlayers = count;
       await room.save();
+      // Update public rooms list so the room reflects current state
+      if (room.isPublic) {
+        const rooms = await getActiveRooms();
+        io.emit("roomsUpdate", rooms);
+      }
       return;
     }
 
     // Intentional leave: remove player immediately
     if (playerId) {
       const wasHost = room.host === playerId;
+
+      // If the host leaves, end the room and kick everyone
+      if (wasHost) {
+        clearAllGracePeriodsForRoom(roomId);
+        cancelTimer(roomId);
+        room.status = "ended";
+        room.activePlayers = 0;
+        await room.save();
+        io.to(roomId).emit("roomClosed");
+        const rooms = await getActiveRooms();
+        io.emit("roomsUpdate", rooms);
+        return;
+      }
+
       room.players = room.players.filter(
         (p) => p.player._id.toString() !== playerId
       );
-
-      // Host migration: if the leaving player is the host, transfer to next player
-      if (wasHost && room.players.length > 0) {
-        room.host = room.players[0].player._id.toString();
-        hostMigrated = true;
-      }
     }
   } else if (room.status === "playing" && playerId) {
     // Mid-game: start grace period instead of removing player
@@ -79,10 +90,6 @@ const leaveRoom = async (io, socket, roomId, playerId, intentional = false) => {
     io.emit("roomsUpdate", rooms);
   } else {
     await room.save();
-
-    if (hostMigrated) {
-      io.to(roomId).emit("hostMigrated", { newHostId: room.host, room });
-    }
 
     // Notify remaining players so their UI updates
     io.to(roomId).emit("playerLeft", room);

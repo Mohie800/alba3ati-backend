@@ -40,7 +40,35 @@ module.exports.claculateResult = async (io, roomId) => {
       }
     });
 
-    // Snapshot after ba3ati/damazeen kills, before abuJanzeer
+    // Snapshot after ba3ati/damazeen kills, before ballah/abuJanzeer
+    const beforeBallah = {};
+    room.players.forEach((p) => {
+      beforeBallah[p.player._id.toString()] = p.status;
+    });
+
+    // Ballah Abu Seif kills — unblockable (not affected by omda or damazeen protection)
+    const ballahKills = [];
+    room.ballahTargets.forEach((entry) => {
+      const victim = room.players.find(
+        (p) => p.player._id.toString() === entry.target
+      );
+      if (!victim) return;
+
+      victim.status = "dead";
+
+      const killer = room.players.find(
+        (p) => p.player._id.toString() === entry.player
+      );
+      ballahKills.push({
+        victimId: entry.target,
+        victimName: victim.player.name,
+        victimRoleId: victim.roleId,
+        killerId: entry.player,
+        killerName: killer?.player.name || "???",
+      });
+    });
+
+    // Snapshot after ballah kills, before abuJanzeer
     const beforeAbuJanzeer = {};
     room.players.forEach((p) => {
       beforeAbuJanzeer[p.player._id.toString()] = p.status;
@@ -55,12 +83,12 @@ module.exports.claculateResult = async (io, roomId) => {
       }
     });
 
-    // Determine who died from ba3ati/damazeen (regular deaths)
+    // Determine who died from ba3ati/damazeen (regular deaths — before ballah snapshot)
     const newlyDead = room.players
       .filter(
         (p) =>
           wasAlive[p.player._id.toString()] === "alive" &&
-          beforeAbuJanzeer[p.player._id.toString()] === "dead"
+          beforeBallah[p.player._id.toString()] === "dead"
       )
       .map((p) => p.player._id.toString());
 
@@ -86,7 +114,7 @@ module.exports.claculateResult = async (io, roomId) => {
     });
     room.gamePhase = "nightResults";
     await room.save();
-    io.to(roomId).emit("timeout", { room, newlyDead, abuJanzeerDead });
+    io.to(roomId).emit("timeout", { room, newlyDead, abuJanzeerDead, ballahKills });
     cancelTimer(roomId);
     io.to(roomId).emit("stopTimer");
     setTimeout(() => nightResults(io, roomId), 8000);

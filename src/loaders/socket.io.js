@@ -12,6 +12,7 @@ const {
   damazeenProtection,
   sitAlwada3Action,
   abuJanzeerAction,
+  ballahAction,
   skipNightAction,
 } = require("../api/game/room.actions");
 const { voteSubmit, voteSkip } = require("../api/game/votes.game");
@@ -131,7 +132,8 @@ module.exports = (server) => {
           if (isPlayerInGracePeriod(player)) {
             cancelGracePeriod(io, roomId, player);
           }
-          if (isPlayerInWaitingGracePeriod(player)) {
+          const wasInWaitingGrace = isPlayerInWaitingGracePeriod(player);
+          if (wasInWaitingGrace) {
             cancelWaitingGracePeriod(roomId, player);
           }
 
@@ -156,6 +158,11 @@ module.exports = (server) => {
             });
           } else {
             socket.emit("roomJoined", updatedRoom);
+            // Refresh public rooms list so the room reappears after reconnect
+            if (wasInWaitingGrace && updatedRoom.isPublic) {
+              const rooms = await getActiveRooms();
+              io.emit("roomsUpdate", rooms);
+            }
           }
           io.to(roomId).emit("playerJoined", updatedRoom);
         } else {
@@ -225,6 +232,7 @@ module.exports = (server) => {
     );
     socket.on("sitAlwada3Action", (arg) => sitAlwada3Action(io, socket, arg));
     socket.on("abuJanzeerAction", (arg) => abuJanzeerAction(io, socket, arg));
+    socket.on("ballahAction", (arg) => ballahAction(io, socket, arg));
     socket.on("skipNightAction", (arg) => skipNightAction(io, socket, arg));
     //................................................................
 

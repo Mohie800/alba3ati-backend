@@ -174,40 +174,46 @@ const handleWaitingGracePeriodExpiry = async (io, roomId, playerId) => {
 
     const wasHost = room.host === playerId;
 
-    // Remove the player
-    room.players = room.players.filter(
-      (p) => p.player._id.toString() !== playerId
-    );
-
-    if (room.players.length === 0) {
-      // No players left — end the room
+    if (wasHost) {
+      // Host's grace period expired — end the room and kick everyone
       clearAllGracePeriodsForRoom(roomId);
       const { cancelTimer } = require("../game/timer.game");
       cancelTimer(roomId);
       room.status = "ended";
       await room.save();
+      io.to(roomId).emit("roomClosed");
       const activeRooms = await Room.find({
         status: "waiting",
         isPublic: true,
       }).populate("players.player");
       io.emit("roomsUpdate", activeRooms);
+      console.log(
+        `[Disconnect] Host ${playerId} grace period expired — room ${roomId} closed`
+      );
+      return;
+    }
+
+    // Non-host player: remove them from the room
+    room.players = room.players.filter(
+      (p) => p.player._id.toString() !== playerId
+    );
+
+    if (room.players.length === 0) {
+      clearAllGracePeriodsForRoom(roomId);
+      const { cancelTimer } = require("../game/timer.game");
+      cancelTimer(roomId);
+      room.status = "ended";
+      await room.save();
     } else {
-      // Host migration if needed
-      if (wasHost) {
-        room.host = room.players[0].player._id.toString();
-        io.to(roomId).emit("hostMigrated", {
-          newHostId: room.host,
-          room,
-        });
-      }
       await room.save();
       io.to(roomId).emit("playerLeft", room);
-      const activeRooms = await Room.find({
-        status: "waiting",
-        isPublic: true,
-      }).populate("players.player");
-      io.emit("roomsUpdate", activeRooms);
     }
+
+    const activeRooms = await Room.find({
+      status: "waiting",
+      isPublic: true,
+    }).populate("players.player");
+    io.emit("roomsUpdate", activeRooms);
 
     console.log(
       `[Disconnect] Waiting grace period expired for ${playerId} — removed from room ${roomId}`
