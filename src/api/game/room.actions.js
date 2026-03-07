@@ -12,6 +12,7 @@ exports.startGame = async (io, socket, { roomId }) => {
       return;
     }
     room.status = "playing";
+    room.gamePhase = "roleSetup";
     await room.save();
     const rooms = await getActiveRooms();
     io.emit("roomsUpdate", rooms);

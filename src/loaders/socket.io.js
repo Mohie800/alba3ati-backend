@@ -130,7 +130,7 @@ module.exports = (server) => {
         if (alreadyInRoom) {
           // Room ended while player was away — kick them out
           if (room.status === "ended") {
-            socket.emit("roomClosed");
+            socket.emit("roomClosed", { reason: "gameEnded" });
             return;
           }
 

@@ -29,6 +29,7 @@ const RoomSchema = new mongoose.Schema(
     isPublic: { type: Boolean, default: false },
     discussionTime: { type: Number, default: 1 },
     votesVisible: { type: Boolean, default: false },
+    deadChat: { type: Boolean, default: false },
     gamePhase: { type: String, default: "lobby" },
     gameResult: { type: String, default: null },
 
