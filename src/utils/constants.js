@@ -13,7 +13,7 @@ exports.VOTE_TIME = 30;
 exports.GRACE_PERIOD = 60;
 
 // Quick Play
-exports.QUICK_PLAY_MIN_PLAYERS = 2;
+exports.QUICK_PLAY_MIN_PLAYERS = 8;
 exports.QUICK_PLAY_MAX_PLAYERS = 20;
 exports.QUICK_PLAY_COUNTDOWN = 10; // seconds
 exports.QUICK_PLAY_GRACE_PERIOD = 15; // seconds (vs 60 for normal)
