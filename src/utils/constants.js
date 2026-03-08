@@ -15,6 +15,6 @@ exports.GRACE_PERIOD = 60;
 // Quick Play
 exports.QUICK_PLAY_MIN_PLAYERS = 10;
 exports.QUICK_PLAY_MAX_PLAYERS = 20;
-exports.QUICK_PLAY_COUNTDOWN = 10;       // seconds
-exports.QUICK_PLAY_GRACE_PERIOD = 10;    // seconds (vs 60 for normal)
+exports.QUICK_PLAY_COUNTDOWN = 10; // seconds
+exports.QUICK_PLAY_GRACE_PERIOD = 15; // seconds (vs 60 for normal)
 exports.QUICK_PLAY_DISCUSSION_TIME = 180; // 3 minutes in seconds
