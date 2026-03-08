@@ -11,13 +11,13 @@ const waitingGracePeriods = new Map();
  * Start a 30s grace period for a disconnected player.
  * Emits `playerDisconnected` so other clients can show a badge.
  */
-const startGracePeriod = (io, roomId, playerId) => {
+const startGracePeriod = (io, roomId, playerId, graceDuration = GRACE_PERIOD) => {
   // Don't start a duplicate grace period
   if (gracePeriods.has(playerId)) return;
 
   const timerId = setTimeout(() => {
     handleGracePeriodExpiry(io, roomId, playerId);
-  }, GRACE_PERIOD * 1000);
+  }, graceDuration * 1000);
 
   gracePeriods.set(playerId, { timerId, roomId });
 
@@ -137,12 +137,12 @@ const clearAllGracePeriodsForRoom = (roomId) => {
 
 const WAITING_GRACE_PERIOD = 15; // seconds
 
-const startWaitingGracePeriod = (io, roomId, playerId) => {
+const startWaitingGracePeriod = (io, roomId, playerId, duration = WAITING_GRACE_PERIOD) => {
   if (waitingGracePeriods.has(playerId)) return;
 
   const timerId = setTimeout(() => {
     handleWaitingGracePeriodExpiry(io, roomId, playerId);
-  }, WAITING_GRACE_PERIOD * 1000);
+  }, duration * 1000);
 
   waitingGracePeriods.set(playerId, { timerId, roomId });
   console.log(
@@ -172,6 +172,38 @@ const handleWaitingGracePeriodExpiry = async (io, roomId, playerId) => {
     const room = await Room.findOne({ roomId }).populate("players.player");
     if (!room || room.status !== "waiting") return;
 
+    // Quick play rooms: no host concept, just remove the player
+    if (room.isQuickPlay) {
+      room.players = room.players.filter(
+        (p) => p.player._id.toString() !== playerId
+      );
+
+      if (room.players.length === 0) {
+        clearAllGracePeriodsForRoom(roomId);
+        room.status = "ended";
+        const { clearActiveQuickPlayRoomId } = require("./quickPlay.game");
+        clearActiveQuickPlayRoomId(roomId);
+        await room.save();
+      } else {
+        await room.save();
+        io.to(roomId).emit("playerLeft", room);
+        const { evaluateCountdown } = require("./quickPlay.game");
+        evaluateCountdown(io, roomId);
+      }
+
+      const activeRooms = await Room.find({
+        status: "waiting",
+        isPublic: true,
+        isQuickPlay: { $ne: true },
+      }).populate("players.player");
+      io.emit("roomsUpdate", activeRooms);
+
+      console.log(
+        `[Disconnect] Quick play waiting grace expired for ${playerId} — removed from room ${roomId}`
+      );
+      return;
+    }
+
     const wasHost = room.host === playerId;
 
     if (wasHost) {
@@ -185,6 +217,7 @@ const handleWaitingGracePeriodExpiry = async (io, roomId, playerId) => {
       const activeRooms = await Room.find({
         status: "waiting",
         isPublic: true,
+        isQuickPlay: { $ne: true },
       }).populate("players.player");
       io.emit("roomsUpdate", activeRooms);
       console.log(
@@ -212,6 +245,7 @@ const handleWaitingGracePeriodExpiry = async (io, roomId, playerId) => {
     const activeRooms = await Room.find({
       status: "waiting",
       isPublic: true,
+      isQuickPlay: { $ne: true },
     }).populate("players.player");
     io.emit("roomsUpdate", activeRooms);
 

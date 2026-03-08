@@ -5,12 +5,18 @@ const {
   startWaitingGracePeriod,
 } = require("../game/disconnect.game");
 const { cancelTimer } = require("../game/timer.game");
+const {
+  handleQuickPlayLeave,
+  evaluateCountdown,
+} = require("../game/quickPlay.game");
+const { QUICK_PLAY_GRACE_PERIOD } = require("../../utils/constants");
 
 const getActiveRooms = async () => {
   try {
     const activeRooms = await Room.find({
       status: "waiting",
       isPublic: true,
+      isQuickPlay: { $ne: true },
     }).populate("players.player");
     return activeRooms;
   } catch (error) {
@@ -40,6 +46,22 @@ const leaveRoom = async (io, socket, roomId, playerId, intentional = false) => {
   if (!room) return;
 
   if (room.status === "waiting") {
+    // Quick play rooms: no host privileges
+    if (room.isQuickPlay) {
+      if (playerId && intentional) {
+        // Intentional leave: immediate removal
+        await handleQuickPlayLeave(io, roomId, playerId);
+        return;
+      } else if (playerId && !intentional) {
+        // Unintentional disconnect: short grace period
+        startWaitingGracePeriod(io, roomId, playerId, QUICK_PLAY_GRACE_PERIOD);
+        room.activePlayers = count;
+        await room.save();
+        return;
+      }
+      return;
+    }
+
     if (playerId && !intentional) {
       // Unintentional disconnect: give the player time to reconnect
       startWaitingGracePeriod(io, roomId, playerId);
@@ -76,7 +98,8 @@ const leaveRoom = async (io, socket, roomId, playerId, intentional = false) => {
     }
   } else if (room.status === "playing" && playerId) {
     // Mid-game: start grace period instead of removing player
-    startGracePeriod(io, roomId, playerId);
+    const graceDuration = room.isQuickPlay ? QUICK_PLAY_GRACE_PERIOD : undefined;
+    startGracePeriod(io, roomId, playerId, graceDuration);
   }
 
   room.activePlayers = count;

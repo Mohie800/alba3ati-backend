@@ -32,6 +32,7 @@ const {
 } = require("../api/game/disconnect.game");
 const initChat = require("../api/services/chat.service");
 const AppSettings = require("../api/models/appSettings.model");
+const { findOrCreateQuickPlayRoom } = require("../api/game/quickPlay.game");
 
 module.exports = (server) => {
   const io = SocketIO(server, {
@@ -48,6 +49,12 @@ module.exports = (server) => {
   }
   // Initialize chat namespace
   initChat(io);
+
+  // Clean up orphaned quick play rooms from previous server runs
+  Room.updateMany(
+    { isQuickPlay: true, status: "waiting" },
+    { $set: { status: "ended" } }
+  ).exec();
 
   // Connection handler
   io.on("connection", (socket) => {
@@ -169,6 +176,11 @@ module.exports = (server) => {
               const rooms = await getActiveRooms();
               io.emit("roomsUpdate", rooms);
             }
+            // Re-evaluate quick play countdown on reconnect
+            if (wasInWaitingGrace && updatedRoom.isQuickPlay) {
+              const { evaluateCountdown } = require("../api/game/quickPlay.game");
+              evaluateCountdown(io, roomId);
+            }
           }
           io.to(roomId).emit("playerJoined", updatedRoom);
         } else {
@@ -199,9 +211,30 @@ module.exports = (server) => {
 
           socket.emit("roomJoined", updatedRoom);
           io.to(roomId).emit("playerJoined", updatedRoom);
+
+          // Re-evaluate quick play countdown when a new player joins
+          if (updatedRoom.isQuickPlay) {
+            const { evaluateCountdown } = require("../api/game/quickPlay.game");
+            evaluateCountdown(io, roomId);
+          }
         }
       } catch (error) {
         socket.emit("joinError", { message: "Failed to join room" });
+      }
+    });
+
+    // Quick play matchmaking
+    socket.on("quickPlay", async (playerId) => {
+      try {
+        const appSettings = await AppSettings.getSettings();
+        if (appSettings.maintenanceMode) {
+          socket.emit("maintenanceMode", { message: appSettings.maintenanceMessage });
+          return;
+        }
+        await findOrCreateQuickPlayRoom(io, socket, playerId);
+      } catch (error) {
+        console.error("[QuickPlay] Error:", error);
+        socket.emit("joinError", { message: "Failed to join quick play" });
       }
     });
 

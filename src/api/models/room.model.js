@@ -27,6 +27,7 @@ const RoomSchema = new mongoose.Schema(
     votes: [{ type: String, ref: "User" }],
     activePlayers: { type: Number, default: 0 },
     isPublic: { type: Boolean, default: false },
+    isQuickPlay: { type: Boolean, default: false },
     discussionTime: { type: Number, default: 1 },
     votesVisible: { type: Boolean, default: false },
     deadChat: { type: Boolean, default: false },
