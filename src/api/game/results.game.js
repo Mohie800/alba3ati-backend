@@ -4,6 +4,7 @@ const claculateResult = require("./calculate.game");
 const { claculateVoteResult } = require("./claculateVoteResult.game");
 const { startTimer } = require("./timer.game");
 const { clearSkipVotes } = require("./skipDiscussion.game");
+const { updatePlayerStats } = require("./statsUpdate.game");
 
 // Start a separate voting timer instead of counting votes immediately
 const startVotingPhase = async (io, roomId) => {
@@ -37,6 +38,7 @@ module.exports.nightResults = async (io, roomId, voted) => {
       room.gamePhase = "gameOver";
       room.gameResult = "3";
       await room.save();
+      await updatePlayerStats(room, "3");
       io.to(roomId).emit("gameOver", { room, win: "3" });
     } else if (
       ba3atiCount > 0 &&
@@ -46,6 +48,7 @@ module.exports.nightResults = async (io, roomId, voted) => {
       room.gamePhase = "gameOver";
       room.gameResult = "1";
       await room.save();
+      await updatePlayerStats(room, "1");
       io.to(roomId).emit("gameOver", { room, win: "1" });
     } else if (
       villagersCount > 0 &&
@@ -56,11 +59,13 @@ module.exports.nightResults = async (io, roomId, voted) => {
       room.gamePhase = "gameOver";
       room.gameResult = "2";
       await room.save();
+      await updatePlayerStats(room, "2");
       io.to(roomId).emit("gameOver", { room, win: "2" });
     } else if (alivePlayers.length === 0) {
       room.gamePhase = "gameOver";
       room.gameResult = "0";
       await room.save();
+      await updatePlayerStats(room, "0");
       io.to(roomId).emit("gameOver", { room, win: "0" });
       // draw 0
     } else {

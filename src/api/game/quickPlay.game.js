@@ -1,5 +1,4 @@
 const Room = require("../models/room.model");
-const { joinRoom, getActiveRooms } = require("../controllers/room.controller");
 const { calculateRandomDistribution } = require("../../utils/randomDistribution");
 const { startTimer } = require("./timer.game");
 const { claculateResult } = require("./calculate.game");
@@ -35,6 +34,7 @@ function shuffleArray(array) {
  * Find or create a quick play room and add the player to it.
  */
 const findOrCreateQuickPlayRoom = async (io, socket, playerId) => {
+  const { joinRoom } = require("../controllers/room.controller");
   try {
     let room = null;
 
@@ -177,6 +177,7 @@ const cancelQuickPlayCountdown = (io, roomId) => {
  * Auto-start the game when countdown reaches 0.
  */
 const autoStartQuickPlayGame = async (io, roomId) => {
+  const { getActiveRooms } = require("../controllers/room.controller");
   try {
     const room = await Room.findOne({ roomId }).populate("players.player");
     if (!room || room.status !== "waiting") return;
