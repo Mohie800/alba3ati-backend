@@ -7,7 +7,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon src/app.js",
     "seed:admin": "node src/scripts/seedAdmin.js",
-    "flush:rooms": "node src/scripts/flushStaleRooms.js"
+    "flush:rooms": "node src/scripts/flushStaleRooms.js",
+    "flush:incomplete": "node src/scripts/flushIncompleteGames.js"
   },
   "keywords": [],
   "author": "",
