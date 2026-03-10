@@ -51,7 +51,6 @@ const RoomSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-RoomSchema.index({ roomId: 1 });
 RoomSchema.index({ status: 1, isPublic: 1 });
 RoomSchema.index({ isQuickPlay: 1, status: 1 });
 
