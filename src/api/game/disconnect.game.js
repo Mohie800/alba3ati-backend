@@ -55,6 +55,9 @@ const handleGracePeriodExpiry = async (io, roomId, playerId) => {
     const room = await Room.findOne({ roomId }).populate("players.player");
     if (!room || room.status !== "playing") return;
 
+    // During gameOver/rematch, don't mark players dead or resolve phases
+    if (room.gamePhase === "gameOver" || room.gamePhase === "rematch") return;
+
     const player = room.players.find(
       (p) => p.player._id.toString() === playerId
     );

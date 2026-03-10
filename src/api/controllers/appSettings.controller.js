@@ -71,6 +71,7 @@ exports.updateSettings = async (req, res) => {
     }
 
     await settings.save();
+    AppSettings.clearCache();
     return res.json({ data: settings });
   } catch (error) {
     console.error("updateSettings error:", error);

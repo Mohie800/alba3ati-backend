@@ -33,6 +33,12 @@ const {
 const initChat = require("../api/services/chat.service");
 const AppSettings = require("../api/models/appSettings.model");
 const { findOrCreateQuickPlayRoom } = require("../api/game/quickPlay.game");
+const {
+  startRematch,
+  acceptRematch,
+  beginRematch,
+  getRematchRemainingTime,
+} = require("../api/game/rematch.game");
 
 module.exports = (server) => {
   const io = SocketIO(server, {
@@ -40,6 +46,12 @@ module.exports = (server) => {
       origin: config.env === "production" ? "PRODUCTION_URL" : "*",
       methods: ["GET", "POST"],
     },
+    transports: ["websocket", "polling"],
+    perMessageDeflate: {
+      threshold: 1024,
+    },
+    pingInterval: 25000,
+    pingTimeout: 20000,
   });
 
   function getRandomString(length = 7) {
@@ -168,6 +180,8 @@ module.exports = (server) => {
               gamePhase: updatedRoom.gamePhase || "night",
               timer: getRemainingTime(roomId),
               gameResult: updatedRoom.gameResult || null,
+              rematchAccepted: updatedRoom.rematchAccepted || [],
+              rematchTimer: getRematchRemainingTime(roomId),
             });
           } else {
             socket.emit("roomJoined", updatedRoom);
@@ -280,6 +294,13 @@ module.exports = (server) => {
     socket.on("vote", (arg) => voteSubmit(io, socket, arg));
     socket.on("skipVote", (arg) => voteSkip(io, socket, arg));
     socket.on("skipDiscussion", (arg) => skipDiscussionVote(io, socket, arg));
+    //............................................................
+
+    //----------------------------------------------------------------
+    //rematch
+    socket.on("rematchStart", (arg) => startRematch(io, socket, arg));
+    socket.on("rematchAccept", (arg) => acceptRematch(io, socket, arg));
+    socket.on("rematchBegin", (arg) => beginRematch(io, socket, arg));
     //............................................................
 
   });

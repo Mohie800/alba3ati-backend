@@ -8,8 +8,8 @@ module.exports = {
   mongo: {
     uri: process.env.MONGO_URI,
     options: {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
+      maxPoolSize: 25,
+      minPoolSize: 10,
     },
   },
   jwtSecret: process.env.JWT_SECRET,

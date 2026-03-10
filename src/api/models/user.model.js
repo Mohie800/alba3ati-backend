@@ -19,5 +19,6 @@ const userSchema = new mongoose.Schema({
 });
 
 userSchema.index({ "stats.gamesWon": -1, "stats.gamesPlayed": 1 });
+userSchema.index({ deviceId: 1 });
 
 module.exports = mongoose.model("User", userSchema);

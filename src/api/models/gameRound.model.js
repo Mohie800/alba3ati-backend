@@ -13,4 +13,6 @@ const GameRoundSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+GameRoundSchema.index({ roomId: 1 });
+
 module.exports = mongoose.model("GameRound", GameRoundSchema);

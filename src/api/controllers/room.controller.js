@@ -10,6 +10,7 @@ const {
   evaluateCountdown,
 } = require("../game/quickPlay.game");
 const { QUICK_PLAY_GRACE_PERIOD } = require("../../utils/constants");
+const { clearRematchTimer } = require("../game/rematch.game");
 
 const getActiveRooms = async () => {
   try {
@@ -81,6 +82,7 @@ const leaveRoom = async (io, socket, roomId, playerId, intentional = false) => {
 
       // If the host leaves, end the room and kick everyone
       if (wasHost) {
+        clearRematchTimer(roomId);
         clearAllGracePeriodsForRoom(roomId);
         cancelTimer(roomId);
         room.status = "ended";
@@ -97,14 +99,36 @@ const leaveRoom = async (io, socket, roomId, playerId, intentional = false) => {
       );
     }
   } else if (room.status === "playing" && playerId) {
-    // Mid-game: start grace period instead of removing player
-    const graceDuration = room.isQuickPlay ? QUICK_PLAY_GRACE_PERIOD : undefined;
-    startGracePeriod(io, roomId, playerId, graceDuration);
+    const isPostGame =
+      room.gamePhase === "gameOver" || room.gamePhase === "rematch";
+
+    if (intentional && isPostGame) {
+      // Host leaving during gameOver/rematch closes the room (non-quick-play only)
+      if (room.host === playerId && !room.isQuickPlay) {
+        clearRematchTimer(roomId);
+        clearAllGracePeriodsForRoom(roomId);
+        cancelTimer(roomId);
+        room.status = "ended";
+        room.activePlayers = 0;
+        await room.save();
+        io.to(roomId).emit("roomClosed");
+        const rooms = await getActiveRooms();
+        io.emit("roomsUpdate", rooms);
+        return;
+      }
+      // Non-host (or quick play host) intentional leave during gameOver/rematch:
+      // no grace period needed — they'll be excluded from rematch since they won't be connected
+    } else {
+      // Mid-game: start grace period instead of removing player
+      const graceDuration = room.isQuickPlay ? QUICK_PLAY_GRACE_PERIOD : undefined;
+      startGracePeriod(io, roomId, playerId, graceDuration);
+    }
   }
 
   room.activePlayers = count;
 
   if (count === 0) {
+    clearRematchTimer(roomId);
     clearAllGracePeriodsForRoom(roomId);
     cancelTimer(roomId);
     room.status = "ended";

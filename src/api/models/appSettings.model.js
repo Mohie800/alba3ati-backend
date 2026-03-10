@@ -31,13 +31,29 @@ const appSettingsSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// In-memory cache for settings (avoids DB hit on every socket event)
+let cachedSettings = null;
+let cacheTimestamp = 0;
+const CACHE_TTL = 30 * 1000; // 30 seconds
+
 // Singleton: only one settings document exists
 appSettingsSchema.statics.getSettings = async function () {
+  if (cachedSettings && Date.now() - cacheTimestamp < CACHE_TTL) {
+    return cachedSettings;
+  }
   let settings = await this.findOne();
   if (!settings) {
     settings = await this.create({});
   }
+  cachedSettings = settings;
+  cacheTimestamp = Date.now();
   return settings;
+};
+
+// Clear cache when settings are updated (call from admin routes)
+appSettingsSchema.statics.clearCache = function () {
+  cachedSettings = null;
+  cacheTimestamp = 0;
 };
 
 module.exports = mongoose.model("AppSettings", appSettingsSchema);

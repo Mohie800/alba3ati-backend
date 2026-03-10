@@ -25,6 +25,16 @@ function getSitAlwada3Count(total) {
   return randomInt(1, 2);
 }
 
+function getAbuJanzeerChance(total) {
+  if (total <= 4) return 0.15;
+  if (total <= 6) return 0.3;
+  if (total <= 8) return 0.45;
+  if (total <= 10) return 0.6;
+  if (total <= 12) return 0.75;
+  if (total <= 15) return 0.85;
+  return 0.95;
+}
+
 function calculateRandomDistribution(totalPlayers, includedRoles) {
   const dist = {
     "1": 0, // ba3ati
@@ -41,10 +51,12 @@ function calculateRandomDistribution(totalPlayers, includedRoles) {
   dist["1"] = getBa3atiCount(totalPlayers);
   let remaining = totalPlayers - dist["1"];
 
-  // Abu Janzeer: exactly 1 if included and enough room (need >=1 for al3omda)
+  // Abu Janzeer: probability scales with player count
   if (includedRoles.abuJanzeer && remaining > 1) {
-    dist["5"] = 1;
-    remaining -= 1;
+    if (Math.random() < getAbuJanzeerChance(totalPlayers)) {
+      dist["5"] = 1;
+      remaining -= 1;
+    }
   }
 
   // Damazeen: scales with player count, cap at 3

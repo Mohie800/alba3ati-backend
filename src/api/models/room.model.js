@@ -46,8 +46,13 @@ const RoomSchema = new mongoose.Schema(
     abuJanzeerTargets: [{ player: { type: String }, target: { type: String } }],
     ballahTargets: [{ player: { type: String }, target: { type: String } }],
     ballahAttackUsedBy: [{ type: String }],
+    rematchAccepted: [{ type: String }],
   },
   { timestamps: true }
 );
+
+RoomSchema.index({ roomId: 1 });
+RoomSchema.index({ status: 1, isPublic: 1 });
+RoomSchema.index({ isQuickPlay: 1, status: 1 });
 
 module.exports = mongoose.model("Room", RoomSchema);
