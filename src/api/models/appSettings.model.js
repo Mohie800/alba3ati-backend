@@ -12,6 +12,21 @@ const appSettingsSchema = new mongoose.Schema(
       type: String,
       default: "اللعبة تحت الصيانة حالياً، يرجى المحاولة لاحقاً",
     },
+    communityLinks: {
+      enabled: { type: Boolean, default: false },
+      whatsapp: {
+        url: { type: String, default: "" },
+        enabled: { type: Boolean, default: false },
+      },
+      telegram: {
+        url: { type: String, default: "" },
+        enabled: { type: Boolean, default: false },
+      },
+      discord: {
+        url: { type: String, default: "" },
+        enabled: { type: Boolean, default: false },
+      },
+    },
   },
   { timestamps: true }
 );

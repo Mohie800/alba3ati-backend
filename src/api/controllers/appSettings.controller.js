@@ -6,10 +6,13 @@ exports.checkUpdate = async (req, res) => {
     const { version } = req.query;
     const settings = await AppSettings.getSettings();
 
+    const communityLinks = settings.communityLinks || {};
+
     const response = {
       forceUpdate: false,
       maintenanceMode: settings.maintenanceMode,
       maintenanceMessage: settings.maintenanceMessage,
+      communityLinks,
     };
 
     if (!settings.forceUpdate || !version) {
@@ -47,7 +50,7 @@ exports.getSettings = async (req, res) => {
 // Admin: update settings
 exports.updateSettings = async (req, res) => {
   try {
-    const { forceUpdate, minVersion, updateMessage, playStoreUrl, appStoreUrl, maintenanceMode, maintenanceMessage } = req.body;
+    const { forceUpdate, minVersion, updateMessage, playStoreUrl, appStoreUrl, maintenanceMode, maintenanceMessage, communityLinks } = req.body;
     const settings = await AppSettings.getSettings();
 
     if (typeof forceUpdate === "boolean") settings.forceUpdate = forceUpdate;
@@ -57,12 +60,32 @@ exports.updateSettings = async (req, res) => {
     if (typeof appStoreUrl === "string") settings.appStoreUrl = appStoreUrl;
     if (typeof maintenanceMode === "boolean") settings.maintenanceMode = maintenanceMode;
     if (typeof maintenanceMessage === "string") settings.maintenanceMessage = maintenanceMessage;
+    if (communityLinks && typeof communityLinks === "object") {
+      if (typeof communityLinks.enabled === "boolean") settings.communityLinks.enabled = communityLinks.enabled;
+      for (const platform of ["whatsapp", "telegram", "discord"]) {
+        if (communityLinks[platform]) {
+          if (typeof communityLinks[platform].url === "string") settings.communityLinks[platform].url = communityLinks[platform].url;
+          if (typeof communityLinks[platform].enabled === "boolean") settings.communityLinks[platform].enabled = communityLinks[platform].enabled;
+        }
+      }
+    }
 
     await settings.save();
     return res.json({ data: settings });
   } catch (error) {
     console.error("updateSettings error:", error);
     return res.status(500).json({ error: "Failed to update settings" });
+  }
+};
+
+// Public: returns community links for landing page / external use
+exports.getCommunityLinks = async (req, res) => {
+  try {
+    const settings = await AppSettings.getSettings();
+    return res.json(settings.communityLinks || {});
+  } catch (error) {
+    console.error("getCommunityLinks error:", error);
+    return res.json({ enabled: false });
   }
 };
 
