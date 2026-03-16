@@ -39,6 +39,7 @@ const {
   beginRematch,
   getRematchRemainingTime,
 } = require("../api/game/rematch.game");
+const { updatePeakConcurrent } = require("../api/game/dailyStats.game");
 
 module.exports = (server) => {
   const io = SocketIO(server, {
@@ -71,6 +72,7 @@ module.exports = (server) => {
   // Connection handler
   io.on("connection", (socket) => {
     console.log("New client connected");
+    updatePeakConcurrent(io.engine.clientsCount);
 
     // Track which room this socket is in and who they are
     socket.gameRoomId = null;

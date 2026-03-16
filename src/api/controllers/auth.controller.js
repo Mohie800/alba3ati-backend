@@ -1,6 +1,7 @@
 const User = require("../models/user.model");
 const BannedDevice = require("../models/bannedDevice.model");
 const config = require("../../config/config");
+const { recordNewUser } = require("../game/dailyStats.game");
 
 const normalizeDeviceId = (id) => (id ? id.trim().toLowerCase() : null);
 
@@ -37,6 +38,7 @@ exports.register = async (req, res) => {
 
     // Create a new user
     const user = await User.create({ name, deviceId: deviceId || null });
+    recordNewUser();
 
     // Respond with user data and token
     res.status(201).json({

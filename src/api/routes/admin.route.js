@@ -9,6 +9,7 @@ const reportController = require("../controllers/report.controller");
 const appSettingsController = require("../controllers/appSettings.controller");
 const notificationController = require("../controllers/notification.controller");
 const adController = require("../controllers/ad.controller");
+const dailyStatsController = require("../controllers/dailyStats.controller");
 const upload = require("../middleware/upload");
 
 // Public
@@ -49,5 +50,8 @@ router.post("/ads", adminAuth, upload.single("image"), adController.createAd);
 router.get("/ads", adminAuth, adController.getAds);
 router.put("/ads/:id", adminAuth, upload.single("image"), adController.updateAd);
 router.delete("/ads/:id", adminAuth, adController.deleteAd);
+
+// Daily Stats / Analytics
+router.get("/daily-stats", adminAuth, dailyStatsController.getDailyStats);
 
 module.exports = router;
