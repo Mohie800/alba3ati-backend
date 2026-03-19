@@ -63,11 +63,38 @@ module.exports = (server) => {
   // Initialize chat namespace
   initChat(io);
 
-  // Clean up orphaned quick play rooms from previous server runs
+  // Clean up orphaned rooms from previous server runs
+  // (grace period timers are in-memory and lost on restart)
   Room.updateMany(
-    { isQuickPlay: true, status: "waiting" },
+    { status: { $in: ["waiting", "playing"] } },
     { $set: { status: "ended" } }
-  ).exec();
+  ).exec().then((result) => {
+    if (result.modifiedCount > 0) {
+      console.log(`[Cleanup] Ended ${result.modifiedCount} orphaned rooms from previous run`);
+    }
+  });
+
+  // Periodic cleanup: end stale rooms with 0 active sockets every 5 minutes
+  setInterval(async () => {
+    try {
+      const staleThreshold = new Date(Date.now() - 5 * 60 * 1000); // 5 min ago
+      const result = await Room.updateMany(
+        {
+          status: { $in: ["waiting", "playing"] },
+          activePlayers: 0,
+          updatedAt: { $lt: staleThreshold },
+        },
+        { $set: { status: "ended" } }
+      );
+      if (result.modifiedCount > 0) {
+        console.log(`[Cleanup] Ended ${result.modifiedCount} stale rooms`);
+        const rooms = await getActiveRooms();
+        io.emit("roomsUpdate", rooms);
+      }
+    } catch (err) {
+      console.error("[Cleanup] Error cleaning stale rooms:", err);
+    }
+  }, 5 * 60 * 1000);
 
   // Connection handler
   io.on("connection", (socket) => {

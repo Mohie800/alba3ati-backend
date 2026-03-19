@@ -6,6 +6,9 @@ const notificationController = require("../controllers/notification.controller")
 // POST /api/auth/register
 router.post("/register", authController.register);
 
+// PUT /api/auth/update-name
+router.put("/update-name", authController.updateName);
+
 // GET /api/auth/check-ban?deviceId=xxx
 router.get("/check-ban", authController.checkBan);
 

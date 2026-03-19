@@ -114,6 +114,37 @@ exports.deleteAccount = async (req, res) => {
   }
 };
 
+exports.updateName = async (req, res) => {
+  try {
+    const { userId, name } = req.body;
+
+    if (!userId || !name || name.trim().length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: "userId and a name with at least 2 characters are required",
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { name: name.trim() },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+
+    res.json({
+      success: true,
+      data: { user: { id: user._id, name: user.name } },
+    });
+  } catch (error) {
+    console.error("Update name error:", error);
+    res.status(500).json({ success: false, error: "Failed to update name" });
+  }
+};
+
 exports.checkBan = async (req, res) => {
   try {
     const { deviceId } = req.query;
