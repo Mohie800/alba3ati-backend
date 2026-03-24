@@ -2,6 +2,7 @@ const Room = require("../models/room.model");
 const res = require("./results.game");
 const { startTimer } = require("./timer.game");
 const { clearSkipVotes } = require("./skipDiscussion.game");
+const { clearMutedPlayers } = require("./mutePlayer.game");
 const resetPlayingStatus = async (roomId) => {
   try {
     const room = await Room.findOne({ roomId });
@@ -15,9 +16,12 @@ const resetPlayingStatus = async (roomId) => {
     room.sitAlwada3Targets = [];
     room.abuJanzeerTargets = [];
     room.ballahTargets = [];
+    room.ba3atiKabeerTargets = [];
+    room.ba3atiKabeerConvertTargets = [];
     room.damazeenProtection = false;
     await room.save();
     clearSkipVotes(roomId);
+    clearMutedPlayers(roomId);
     return;
   } catch (error) {
     console.log(error);

@@ -4,12 +4,14 @@ const claculateResult = require("./calculate.game");
 const { claculateVoteResult } = require("./claculateVoteResult.game");
 const { startTimer } = require("./timer.game");
 const { clearSkipVotes } = require("./skipDiscussion.game");
+const { clearMutedPlayers } = require("./mutePlayer.game");
 const { updatePlayerStats } = require("./statsUpdate.game");
 const { recordGameEnd } = require("./dailyStats.game");
 
 // Start a separate voting timer instead of counting votes immediately
 const startVotingPhase = async (io, roomId) => {
   clearSkipVotes(roomId);
+  clearMutedPlayers(roomId);
   const room = await Room.findOne({ roomId });
   if (room) {
     room.gamePhase = "voting";
@@ -29,10 +31,12 @@ module.exports.nightResults = async (io, roomId, voted) => {
     }
     const alivePlayers = room.players.filter((p) => p.status === "alive");
     await room.save();
-    const ba3atiCount = alivePlayers.filter((p) => p.roleId === "1").length;
+    const ba3atiCount = alivePlayers.filter(
+      (p) => p.roleId === "1" || p.roleId === "7",
+    ).length;
     const abuJanzeerCount = alivePlayers.filter((p) => p.roleId === "5").length;
     const villagersCount = alivePlayers.filter(
-      (p) => p.roleId !== "1" && p.roleId !== "5",
+      (p) => p.roleId !== "1" && p.roleId !== "5" && p.roleId !== "7",
     ).length;
     if (alivePlayers.length === 1 && abuJanzeerCount === 1) {
       // abu janzeer wins 3

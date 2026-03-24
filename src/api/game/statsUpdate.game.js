@@ -4,6 +4,7 @@ const User = require("../models/user.model");
 function didPlayerWin(roleId, gameResult) {
   if (gameResult === "0") return "draw";
   if (roleId === "1" && gameResult === "1") return "win";
+  if (roleId === "7" && gameResult === "1") return "win";
   if (["2", "3", "4", "6"].includes(roleId) && gameResult === "2") return "win";
   if (roleId === "5" && gameResult === "3") return "win";
   return "loss";

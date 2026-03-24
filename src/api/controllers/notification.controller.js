@@ -1,13 +1,17 @@
 const User = require("../models/user.model");
 const Notification = require("../models/notification.model");
-const { sendPushNotification } = require("../services/pushNotification.service");
+const {
+  sendPushNotification,
+} = require("../services/pushNotification.service");
 
 exports.savePushToken = async (req, res) => {
   try {
     const { userId, token } = req.body;
 
     if (!userId || !token) {
-      return res.status(400).json({ success: false, message: "userId and token are required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "userId and token are required" });
     }
 
     await User.findByIdAndUpdate(userId, { expoPushToken: token });
@@ -24,7 +28,9 @@ exports.sendNotification = async (req, res) => {
     const { title, body, userIds } = req.body;
 
     if (!title || !body) {
-      return res.status(400).json({ success: false, message: "Title and body are required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Title and body are required" });
     }
 
     const type = userIds && userIds.length > 0 ? "targeted" : "broadcast";
@@ -88,6 +94,60 @@ exports.getUserNotifications = async (req, res) => {
     res.json({ success: true, data: { notifications } });
   } catch (err) {
     console.error("Get user notifications error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.getPublicRoomPreference = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const user = await User.findById(userId).select("notificationPreferences");
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    const enabled = user.notificationPreferences?.publicRooms !== false;
+    res.json({ success: true, data: { enabled } });
+  } catch (err) {
+    console.error("Get public room preference error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.updatePublicRoomPreference = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { enabled } = req.body;
+
+    if (typeof enabled !== "boolean") {
+      return res
+        .status(400)
+        .json({ success: false, message: "enabled must be boolean" });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $set: { "notificationPreferences.publicRooms": enabled } },
+      { new: true },
+    ).select("notificationPreferences");
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        enabled: user.notificationPreferences?.publicRooms !== false,
+      },
+    });
+  } catch (err) {
+    console.error("Update public room preference error:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };

@@ -2,7 +2,11 @@ const SocketIO = require("socket.io");
 const config = require("../config/config");
 
 const Room = require("../api/models/room.model");
+const User = require("../api/models/user.model");
 const GameRound = require("../api/models/gameRound.model");
+const {
+  sendPushNotification,
+} = require("../api/services/pushNotification.service");
 const { assignRoles } = require("../api/game/roles.game");
 const {
   ba3atiAction,
@@ -14,9 +18,15 @@ const {
   abuJanzeerAction,
   ballahAction,
   skipNightAction,
+  ba3atiKabeerAction,
+  ba3atiKabeerConvert,
 } = require("../api/game/room.actions");
 const { voteSubmit, voteSkip } = require("../api/game/votes.game");
 const { skipDiscussionVote } = require("../api/game/skipDiscussion.game");
+const {
+  mutePlayerToggle,
+  getMutedPlayers,
+} = require("../api/game/mutePlayer.game");
 const { getRemainingTime } = require("../api/game/timer.game");
 const {
   getActiveRooms,
@@ -67,34 +77,41 @@ module.exports = (server) => {
   // (grace period timers are in-memory and lost on restart)
   Room.updateMany(
     { status: { $in: ["waiting", "playing"] } },
-    { $set: { status: "ended" } }
-  ).exec().then((result) => {
-    if (result.modifiedCount > 0) {
-      console.log(`[Cleanup] Ended ${result.modifiedCount} orphaned rooms from previous run`);
-    }
-  });
+    { $set: { status: "ended" } },
+  )
+    .exec()
+    .then((result) => {
+      if (result.modifiedCount > 0) {
+        console.log(
+          `[Cleanup] Ended ${result.modifiedCount} orphaned rooms from previous run`,
+        );
+      }
+    });
 
   // Periodic cleanup: end stale rooms with 0 active sockets every 5 minutes
-  setInterval(async () => {
-    try {
-      const staleThreshold = new Date(Date.now() - 5 * 60 * 1000); // 5 min ago
-      const result = await Room.updateMany(
-        {
-          status: { $in: ["waiting", "playing"] },
-          activePlayers: 0,
-          updatedAt: { $lt: staleThreshold },
-        },
-        { $set: { status: "ended" } }
-      );
-      if (result.modifiedCount > 0) {
-        console.log(`[Cleanup] Ended ${result.modifiedCount} stale rooms`);
-        const rooms = await getActiveRooms();
-        io.emit("roomsUpdate", rooms);
+  setInterval(
+    async () => {
+      try {
+        const staleThreshold = new Date(Date.now() - 5 * 60 * 1000); // 5 min ago
+        const result = await Room.updateMany(
+          {
+            status: { $in: ["waiting", "playing"] },
+            activePlayers: 0,
+            updatedAt: { $lt: staleThreshold },
+          },
+          { $set: { status: "ended" } },
+        );
+        if (result.modifiedCount > 0) {
+          console.log(`[Cleanup] Ended ${result.modifiedCount} stale rooms`);
+          const rooms = await getActiveRooms();
+          io.emit("roomsUpdate", rooms);
+        }
+      } catch (err) {
+        console.error("[Cleanup] Error cleaning stale rooms:", err);
       }
-    } catch (err) {
-      console.error("[Cleanup] Error cleaning stale rooms:", err);
-    }
-  }, 5 * 60 * 1000);
+    },
+    5 * 60 * 1000,
+  );
 
   // Connection handler
   io.on("connection", (socket) => {
@@ -111,7 +128,9 @@ module.exports = (server) => {
         // Check maintenance mode
         const appSettings = await AppSettings.getSettings();
         if (appSettings.maintenanceMode) {
-          socket.emit("maintenanceMode", { message: appSettings.maintenanceMessage });
+          socket.emit("maintenanceMode", {
+            message: appSettings.maintenanceMessage,
+          });
           return;
         }
 
@@ -125,7 +144,7 @@ module.exports = (server) => {
         });
 
         const roomDetails = await Room.findOne({ roomId }).populate(
-          "players.player"
+          "players.player",
         );
         // Join the room
         joinRoom(io, socket, roomId);
@@ -162,14 +181,16 @@ module.exports = (server) => {
 
         // Check if player already exists in room (reconnect scenario)
         const alreadyInRoom = room.players.some(
-          (p) => p.player._id.toString() === player
+          (p) => p.player._id.toString() === player,
         );
 
         // Check maintenance mode (allow reconnects to pass through)
         if (!alreadyInRoom) {
           const appSettings = await AppSettings.getSettings();
           if (appSettings.maintenanceMode) {
-            socket.emit("maintenanceMode", { message: appSettings.maintenanceMessage });
+            socket.emit("maintenanceMode", {
+              message: appSettings.maintenanceMessage,
+            });
             return;
           }
         }
@@ -201,7 +222,7 @@ module.exports = (server) => {
           if (room.status === "playing") {
             // Mid-game rejoin: send gameReconnected so frontend restores game state
             const me = room.players.find(
-              (p) => p.player._id.toString() === player
+              (p) => p.player._id.toString() === player,
             );
             socket.emit("gameReconnected", {
               room: updatedRoom,
@@ -211,6 +232,7 @@ module.exports = (server) => {
               gameResult: updatedRoom.gameResult || null,
               rematchAccepted: updatedRoom.rematchAccepted || [],
               rematchTimer: getRematchRemainingTime(roomId),
+              mutedPlayerIds: getMutedPlayers(roomId),
             });
           } else {
             socket.emit("roomJoined", updatedRoom);
@@ -221,7 +243,9 @@ module.exports = (server) => {
             }
             // Re-evaluate quick play countdown on reconnect
             if (wasInWaitingGrace && updatedRoom.isQuickPlay) {
-              const { evaluateCountdown } = require("../api/game/quickPlay.game");
+              const {
+                evaluateCountdown,
+              } = require("../api/game/quickPlay.game");
               evaluateCountdown(io, roomId);
             }
           }
@@ -245,7 +269,7 @@ module.exports = (server) => {
           updatedRoom = await Room.findByIdAndUpdate(
             room._id,
             { $push: { players: { player } } },
-            { new: true }
+            { new: true },
           ).populate("players.player");
 
           joinRoom(io, socket, roomId);
@@ -260,6 +284,60 @@ module.exports = (server) => {
             const { evaluateCountdown } = require("../api/game/quickPlay.game");
             evaluateCountdown(io, roomId);
           }
+
+          if (
+            updatedRoom.isPublic &&
+            !updatedRoom.isQuickPlay &&
+            updatedRoom.status === "waiting" &&
+            updatedRoom.players.length === 3
+          ) {
+            try {
+              const markedRoom = await Room.findOneAndUpdate(
+                {
+                  _id: updatedRoom._id,
+                  publicRoomReadyNotifiedAt: null,
+                },
+                { $set: { publicRoomReadyNotifiedAt: new Date() } },
+                { new: true },
+              );
+
+              if (markedRoom) {
+                const roomPlayerIds = updatedRoom.players
+                  .map((p) => p.player?._id?.toString())
+                  .filter(Boolean);
+
+                const recipients = await User.find({
+                  _id: { $nin: roomPlayerIds },
+                  expoPushToken: { $ne: null },
+                  $or: [
+                    {
+                      "notificationPreferences.publicRooms": { $exists: false },
+                    },
+                    { "notificationPreferences.publicRooms": true },
+                  ],
+                }).select("_id");
+
+                const recipientIds = recipients.map((u) => u._id.toString());
+
+                if (recipientIds.length > 0) {
+                  await sendPushNotification({
+                    title: "غرفة عامة جاهزة",
+                    body: "تم الوصول إلى 3 لاعبين. انضم الآن!",
+                    data: {
+                      screen: "room",
+                      roomId: updatedRoom.roomId,
+                      playerCount: 3,
+                      type: "public_room_ready",
+                    },
+                    userIds: recipientIds,
+                    type: "targeted",
+                  });
+                }
+              }
+            } catch (notifErr) {
+              console.error("Public room ready notification error:", notifErr);
+            }
+          }
         }
       } catch (error) {
         socket.emit("joinError", { message: "Failed to join room" });
@@ -271,7 +349,9 @@ module.exports = (server) => {
       try {
         const appSettings = await AppSettings.getSettings();
         if (appSettings.maintenanceMode) {
-          socket.emit("maintenanceMode", { message: appSettings.maintenanceMessage });
+          socket.emit("maintenanceMode", {
+            message: appSettings.maintenanceMessage,
+          });
           return;
         }
         await findOrCreateQuickPlayRoom(io, socket, playerId);
@@ -310,11 +390,17 @@ module.exports = (server) => {
     socket.on("al3omdaAction", (arg) => al3omdaAction(io, socket, arg));
     socket.on("damazeenAction", (arg) => damazeenAction(io, socket, arg));
     socket.on("damazeenProtection", (arg) =>
-      damazeenProtection(io, socket, arg)
+      damazeenProtection(io, socket, arg),
     );
     socket.on("sitAlwada3Action", (arg) => sitAlwada3Action(io, socket, arg));
     socket.on("abuJanzeerAction", (arg) => abuJanzeerAction(io, socket, arg));
     socket.on("ballahAction", (arg) => ballahAction(io, socket, arg));
+    socket.on("ba3atiKabeerAction", (arg) =>
+      ba3atiKabeerAction(io, socket, arg),
+    );
+    socket.on("ba3atiKabeerConvert", (arg) =>
+      ba3atiKabeerConvert(io, socket, arg),
+    );
     socket.on("skipNightAction", (arg) => skipNightAction(io, socket, arg));
     //................................................................
 
@@ -323,6 +409,7 @@ module.exports = (server) => {
     socket.on("vote", (arg) => voteSubmit(io, socket, arg));
     socket.on("skipVote", (arg) => voteSkip(io, socket, arg));
     socket.on("skipDiscussion", (arg) => skipDiscussionVote(io, socket, arg));
+    socket.on("mutePlayer", (arg) => mutePlayerToggle(io, socket, arg));
     //............................................................
 
     //----------------------------------------------------------------
@@ -331,7 +418,6 @@ module.exports = (server) => {
     socket.on("rematchAccept", (arg) => acceptRematch(io, socket, arg));
     socket.on("rematchBegin", (arg) => beginRematch(io, socket, arg));
     //............................................................
-
   });
 
   return io;

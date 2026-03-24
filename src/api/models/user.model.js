@@ -4,7 +4,11 @@ const userSchema = new mongoose.Schema({
   name: { type: String },
   email: { type: String, unique: true, sparse: true }, // Optional for future use
   deviceId: { type: String, default: null },
+  frame: { type: String, default: null }, // Avatar frame ID (e.g. "wreath", "wings1")
   expoPushToken: { type: String, default: null },
+  notificationPreferences: {
+    publicRooms: { type: Boolean, default: true },
+  },
   createdAt: { type: Date, default: Date.now },
   stats: {
     gamesPlayed: { type: Number, default: 0 },

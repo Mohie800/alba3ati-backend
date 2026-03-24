@@ -20,11 +20,20 @@ router.get("/profile", adminAuth, adminController.getProfile);
 router.get("/stats", adminAuth, statsController.getDashboardStats);
 router.get("/players", adminAuth, statsController.getPlayers);
 router.get("/players/:id", adminAuth, statsController.getPlayerDetail);
+router.patch(
+  "/players/:id/frame",
+  adminAuth,
+  statsController.updatePlayerFrame,
+);
 router.get("/games", adminAuth, statsController.getGames);
 router.get("/games/:id", adminAuth, statsController.getGameDetail);
 router.get("/contacts", adminAuth, contactController.getContacts);
 router.get("/contacts/:id", adminAuth, contactController.getContactDetail);
-router.put("/contacts/:id/respond", adminAuth, contactController.respondToContact);
+router.put(
+  "/contacts/:id/respond",
+  adminAuth,
+  contactController.respondToContact,
+);
 
 // Reports
 router.get("/reports", adminAuth, reportController.getReports);
@@ -42,13 +51,26 @@ router.get("/app-settings", adminAuth, appSettingsController.getSettings);
 router.put("/app-settings", adminAuth, appSettingsController.updateSettings);
 
 // Notifications
-router.post("/notifications/send", adminAuth, notificationController.sendNotification);
-router.get("/notifications", adminAuth, notificationController.getNotifications);
+router.post(
+  "/notifications/send",
+  adminAuth,
+  notificationController.sendNotification,
+);
+router.get(
+  "/notifications",
+  adminAuth,
+  notificationController.getNotifications,
+);
 
 // Ads
 router.post("/ads", adminAuth, upload.single("image"), adController.createAd);
 router.get("/ads", adminAuth, adController.getAds);
-router.put("/ads/:id", adminAuth, upload.single("image"), adController.updateAd);
+router.put(
+  "/ads/:id",
+  adminAuth,
+  upload.single("image"),
+  adController.updateAd,
+);
 router.delete("/ads/:id", adminAuth, adController.deleteAd);
 
 // Daily Stats / Analytics

@@ -33,6 +33,7 @@ const RoomSchema = new mongoose.Schema(
     deadChat: { type: Boolean, default: false },
     gamePhase: { type: String, default: "lobby" },
     gameResult: { type: String, default: null },
+    publicRoomReadyNotifiedAt: { type: Date, default: null },
 
     //actions
     ba3atiTargets: [{ player: { type: String }, target: { type: String } }],
@@ -46,9 +47,16 @@ const RoomSchema = new mongoose.Schema(
     abuJanzeerTargets: [{ player: { type: String }, target: { type: String } }],
     ballahTargets: [{ player: { type: String }, target: { type: String } }],
     ballahAttackUsedBy: [{ type: String }],
+    ba3atiKabeerTargets: [
+      { player: { type: String }, target: { type: String } },
+    ],
+    ba3atiKabeerConvertTargets: [
+      { player: { type: String }, target: { type: String } },
+    ],
+    ba3atiKabeerConvertUsedBy: [{ type: String }],
     rematchAccepted: [{ type: String }],
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 RoomSchema.index({ status: 1, isPublic: 1 });

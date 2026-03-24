@@ -89,7 +89,9 @@ exports.getPlayerDetail = async (req, res) => {
   try {
     const player = await User.findById(req.params.id);
     if (!player) {
-      return res.status(404).json({ success: false, message: "Player not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Player not found" });
     }
 
     const [games, deviceBanned] = await Promise.all([
@@ -97,10 +99,15 @@ exports.getPlayerDetail = async (req, res) => {
         .select("roomId status players roundNumber createdAt")
         .sort({ createdAt: -1 })
         .limit(50),
-      player.deviceId ? BannedDevice.findOne({ deviceId: player.deviceId }) : null,
+      player.deviceId
+        ? BannedDevice.findOne({ deviceId: player.deviceId })
+        : null,
     ]);
 
-    res.json({ success: true, data: { player, games, deviceBanned: !!deviceBanned } });
+    res.json({
+      success: true,
+      data: { player, games, deviceBanned: !!deviceBanned },
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
   }
@@ -140,11 +147,55 @@ exports.getGames = async (req, res) => {
 
 exports.getGameDetail = async (req, res) => {
   try {
-    const game = await Room.findById(req.params.id).populate("players.player", "name createdAt");
+    const game = await Room.findById(req.params.id).populate(
+      "players.player",
+      "name createdAt",
+    );
     if (!game) {
-      return res.status(404).json({ success: false, message: "Game not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Game not found" });
     }
     res.json({ success: true, data: { game } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+const VALID_FRAME_IDS = [
+  "wreath",
+  "wreath2",
+  "wings1",
+  "wings2",
+  "wings3",
+  "wings4",
+  "wings5",
+  "wings6",
+];
+
+exports.updatePlayerFrame = async (req, res) => {
+  try {
+    const { frame } = req.body;
+    if (
+      frame !== null &&
+      frame !== undefined &&
+      !VALID_FRAME_IDS.includes(frame)
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid frame ID" });
+    }
+    const player = await User.findByIdAndUpdate(
+      req.params.id,
+      { frame: frame || null },
+      { new: true },
+    );
+    if (!player) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Player not found" });
+    }
+    res.json({ success: true, data: { frame: player.frame } });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
   }

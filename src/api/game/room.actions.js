@@ -27,7 +27,7 @@ const resoveAction = async (roomId, io, socket) => {
   const room = await Room.findOne({ roomId }).populate("players.player");
   if (!room) return;
   const notDone = room.players.find(
-    (p) => p.playStatus === "playing" && p.status === "alive"
+    (p) => p.playStatus === "playing" && p.status === "alive",
   );
   if (!notDone) {
     io.to(roomId).emit("playerDone", room);
@@ -52,16 +52,21 @@ exports.al3omdaAction = async (io, socket, { roomId, targetId, playerId }) => {
     if (!room) return;
 
     // Cannot protect the same player two nights in a row (per al3omda)
-    const myLastTarget = room.lastAl3omdaTargets && room.lastAl3omdaTargets.get
-      ? room.lastAl3omdaTargets.get(playerId)
-      : null;
+    const myLastTarget =
+      room.lastAl3omdaTargets && room.lastAl3omdaTargets.get
+        ? room.lastAl3omdaTargets.get(playerId)
+        : null;
     if (myLastTarget && myLastTarget === targetId) {
-      socket.emit("actionError", { message: "لا يمكنك حماية نفس اللاعب ليلتين متتاليتين" });
+      socket.emit("actionError", {
+        message: "لا يمكنك حماية نفس اللاعب ليلتين متتاليتين",
+      });
       return;
     }
 
     // Validate target is alive and in the room
-    const targetPlayer = room.players.find((p) => p.player._id.toString() === targetId);
+    const targetPlayer = room.players.find(
+      (p) => p.player._id.toString() === targetId,
+    );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
     // Atomically update player status and push target
@@ -71,7 +76,7 @@ exports.al3omdaAction = async (io, socket, { roomId, targetId, playerId }) => {
         $set: { "players.$.playStatus": "done", "players.$.target": targetId },
         $push: { al3omdaTargets: { player: playerId, target: targetId } },
       },
-      { new: true }
+      { new: true },
     );
     if (!updated) return;
 
@@ -89,7 +94,9 @@ exports.ba3atiAction = async (io, socket, { roomId, targetId, playerId }) => {
     if (!room) return;
 
     // Validate target is alive and in the room
-    const targetPlayer = room.players.find((p) => p.player._id.toString() === targetId);
+    const targetPlayer = room.players.find(
+      (p) => p.player._id.toString() === targetId,
+    );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
     // Atomically update player status and push target
@@ -99,7 +106,7 @@ exports.ba3atiAction = async (io, socket, { roomId, targetId, playerId }) => {
         $set: { "players.$.playStatus": "done", "players.$.target": targetId },
         $push: { ba3atiTargets: { player: playerId, target: targetId } },
       },
-      { new: true }
+      { new: true },
     );
     if (!updated) return;
 
@@ -122,7 +129,9 @@ exports.damazeenAction = async (io, socket, { roomId, targetId, playerId }) => {
     }
 
     // Validate target is alive and in the room
-    const targetPlayer = room.players.find((p) => p.player._id.toString() === targetId);
+    const targetPlayer = room.players.find(
+      (p) => p.player._id.toString() === targetId,
+    );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
     // Atomically update player status and push targets
@@ -135,7 +144,7 @@ exports.damazeenAction = async (io, socket, { roomId, targetId, playerId }) => {
           damazeenAttackUsedBy: playerId,
         },
       },
-      { new: true }
+      { new: true },
     );
     if (!updated) return;
 
@@ -164,7 +173,7 @@ exports.damazeenProtection = async (io, socket, { roomId, playerId }) => {
         $set: { "players.$.playStatus": "done", damazeenProtection: true },
         $push: { damazeenProtectUsedBy: playerId },
       },
-      { new: true }
+      { new: true },
     );
     if (!updated) return;
 
@@ -175,13 +184,19 @@ exports.damazeenProtection = async (io, socket, { roomId, playerId }) => {
     return;
   }
 };
-exports.sitAlwada3Action = async (io, socket, { roomId, targetId, playerId }) => {
+exports.sitAlwada3Action = async (
+  io,
+  socket,
+  { roomId, targetId, playerId },
+) => {
   try {
     const room = await Room.findOne({ roomId }).populate("players.player");
     if (!room) return;
 
     // Validate target is alive and in the room
-    const targetPlayer = room.players.find((p) => p.player._id.toString() === targetId);
+    const targetPlayer = room.players.find(
+      (p) => p.player._id.toString() === targetId,
+    );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
     // Privately reveal the target's role to the requesting socket
@@ -198,7 +213,7 @@ exports.sitAlwada3Action = async (io, socket, { roomId, targetId, playerId }) =>
         $set: { "players.$.playStatus": "done", "players.$.target": targetId },
         $push: { sitAlwada3Targets: { player: playerId, target: targetId } },
       },
-      { new: true }
+      { new: true },
     );
     if (!updated) return;
 
@@ -209,13 +224,19 @@ exports.sitAlwada3Action = async (io, socket, { roomId, targetId, playerId }) =>
     return;
   }
 };
-exports.abuJanzeerAction = async (io, socket, { roomId, targetId, playerId }) => {
+exports.abuJanzeerAction = async (
+  io,
+  socket,
+  { roomId, targetId, playerId },
+) => {
   try {
     const room = await Room.findOne({ roomId }).populate("players.player");
     if (!room) return;
 
     // Validate target is alive and in the room
-    const targetPlayer = room.players.find((p) => p.player._id.toString() === targetId);
+    const targetPlayer = room.players.find(
+      (p) => p.player._id.toString() === targetId,
+    );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
     // Atomically update player status and push target
@@ -225,7 +246,7 @@ exports.abuJanzeerAction = async (io, socket, { roomId, targetId, playerId }) =>
         $set: { "players.$.playStatus": "done", "players.$.target": targetId },
         $push: { abuJanzeerTargets: { player: playerId, target: targetId } },
       },
-      { new: true }
+      { new: true },
     );
     if (!updated) return;
 
@@ -249,7 +270,7 @@ exports.ballahAction = async (io, socket, { roomId, targetId, playerId }) => {
 
     // Validate target is alive and in the room
     const targetPlayer = room.players.find(
-      (p) => p.player._id.toString() === targetId
+      (p) => p.player._id.toString() === targetId,
     );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
@@ -263,7 +284,7 @@ exports.ballahAction = async (io, socket, { roomId, targetId, playerId }) => {
           ballahAttackUsedBy: playerId,
         },
       },
-      { new: true }
+      { new: true },
     );
     if (!updated) return;
 
@@ -280,7 +301,82 @@ exports.skipNightAction = async (io, socket, { roomId, playerId }) => {
     const updated = await Room.findOneAndUpdate(
       playerElemMatch(roomId, playerId),
       { $set: { "players.$.playStatus": "done" } },
-      { new: true }
+      { new: true },
+    );
+    if (!updated) return;
+
+    await resoveAction(roomId, io, socket);
+    return;
+  } catch (error) {
+    console.log(error);
+    return;
+  }
+};
+exports.ba3atiKabeerAction = async (
+  io,
+  socket,
+  { roomId, targetId, playerId },
+) => {
+  try {
+    const room = await Room.findOne({ roomId }).populate("players.player");
+    if (!room) return;
+
+    // Validate target is alive and in the room
+    const targetPlayer = room.players.find(
+      (p) => p.player._id.toString() === targetId,
+    );
+    if (!targetPlayer || targetPlayer.status !== "alive") return;
+
+    // Atomically update player status and push target (kill mode)
+    const updated = await Room.findOneAndUpdate(
+      playerElemMatch(roomId, playerId),
+      {
+        $set: { "players.$.playStatus": "done", "players.$.target": targetId },
+        $push: { ba3atiKabeerTargets: { player: playerId, target: targetId } },
+      },
+      { new: true },
+    );
+    if (!updated) return;
+
+    await resoveAction(roomId, io, socket);
+    return;
+  } catch (error) {
+    console.log(error);
+    return;
+  }
+};
+exports.ba3atiKabeerConvert = async (
+  io,
+  socket,
+  { roomId, targetId, playerId },
+) => {
+  try {
+    const room = await Room.findOne({ roomId }).populate("players.player");
+    if (!room) return;
+
+    // Ba3ati Kabeer can only convert once per game
+    if (room.ba3atiKabeerConvertUsedBy.includes(playerId)) {
+      socket.emit("actionError", { message: "لقد استخدمت التحويل بالفعل" });
+      return;
+    }
+
+    // Validate target is alive and in the room
+    const targetPlayer = room.players.find(
+      (p) => p.player._id.toString() === targetId,
+    );
+    if (!targetPlayer || targetPlayer.status !== "alive") return;
+
+    // Atomically update player status and push convert target
+    const updated = await Room.findOneAndUpdate(
+      playerElemMatch(roomId, playerId),
+      {
+        $set: { "players.$.playStatus": "done", "players.$.target": targetId },
+        $push: {
+          ba3atiKabeerConvertTargets: { player: playerId, target: targetId },
+          ba3atiKabeerConvertUsedBy: playerId,
+        },
+      },
+      { new: true },
     );
     if (!updated) return;
 

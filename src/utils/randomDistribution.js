@@ -43,6 +43,7 @@ function calculateRandomDistribution(totalPlayers, includedRoles) {
     "4": 0, // sit alwada3
     "5": 0, // abu janzeer
     "6": 0, // ballah abu seif
+    "7": 0, // ba3ati kabeer
   };
 
   if (totalPlayers < 2) return dist;
@@ -50,6 +51,12 @@ function calculateRandomDistribution(totalPlayers, includedRoles) {
   // Ba3ati always included
   dist["1"] = getBa3atiCount(totalPlayers);
   let remaining = totalPlayers - dist["1"];
+
+  // Ba3ati Kabeer: max 1 in random mode, included if enough players (7+)
+  if (includedRoles.ba3atiKabeer && remaining > 2 && totalPlayers >= 7) {
+    dist["7"] = 1;
+    remaining -= 1;
+  }
 
   // Abu Janzeer: probability scales with player count
   if (includedRoles.abuJanzeer && remaining > 1) {

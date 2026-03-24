@@ -1,5 +1,6 @@
 const Room = require("../models/room.model");
 const { clearSkipVotes } = require("./skipDiscussion.game");
+const { clearMutedPlayers } = require("./mutePlayer.game");
 const { cancelTimer, startTimer } = require("./timer.game");
 const { calculateRandomDistribution } = require("../../utils/randomDistribution");
 const { claculateResult } = require("./calculate.game");
@@ -210,6 +211,7 @@ const rematchTimeout = async (io, roomId) => {
 const resetRoomForRematch = (room) => {
   // Clear in-memory state from previous game
   clearSkipVotes(room.roomId);
+  clearMutedPlayers(room.roomId);
   cancelTimer(room.roomId);
 
   room.status = "playing";
@@ -240,6 +242,9 @@ const resetRoomForRematch = (room) => {
   room.abuJanzeerTargets = [];
   room.ballahTargets = [];
   room.ballahAttackUsedBy = [];
+  room.ba3atiKabeerTargets = [];
+  room.ba3atiKabeerConvertTargets = [];
+  room.ba3atiKabeerConvertUsedBy = [];
   room.lastAl3omdaTargets = new Map();
 };
 
@@ -252,6 +257,7 @@ const autoStartQuickPlayRematch = async (io, room) => {
     sitAlwada3: true,
     abuJanzeer: true,
     ballah: true,
+    ba3atiKabeer: true,
   });
 
   const rolePool = [];

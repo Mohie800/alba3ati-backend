@@ -193,6 +193,7 @@ const autoStartQuickPlayGame = async (io, roomId) => {
       sitAlwada3: true,
       abuJanzeer: true,
       ballah: true,
+      ba3atiKabeer: true,
     });
 
     // Create role pool and assign
