@@ -366,6 +366,14 @@ exports.ba3atiKabeerConvert = async (
     );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
+    // Convert can only target non-ba3ati roles
+    if (targetPlayer.roleId === "1" || targetPlayer.roleId === "7") {
+      socket.emit("actionError", {
+        message: "لا يمكن تحويل لاعب من فريق البعاتي",
+      });
+      return;
+    }
+
     // Atomically update player status and push convert target
     const updated = await Room.findOneAndUpdate(
       playerElemMatch(roomId, playerId),

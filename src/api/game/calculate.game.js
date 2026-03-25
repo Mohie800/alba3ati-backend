@@ -17,13 +17,28 @@ module.exports.claculateResult = async (io, roomId) => {
     const ba3atiTargets = room.ba3atiTargets.map((t) => t.target);
     const al3omdatargets = new Set(room.al3omdaTargets.map((t) => t.target)); // Use a Set for fast lookup
 
+    // A successful Ba3ati Kabeer conversion takes priority over Ba3ati-team kills.
+    // If target is valid for conversion this night (not protected), they should be converted, not killed by ba3ati attacks.
+    const ba3atiKabeerConvertSafeTargets = new Set();
+    if (!room.damazeenProtection) {
+      room.ba3atiKabeerConvertTargets.forEach((entry) => {
+        const target = room.players.find(
+          (p) => p.player._id.toString() === entry.target,
+        );
+        if (!target || target.status === "dead") return;
+        if (al3omdatargets.has(entry.target)) return;
+        if (target.roleId === "1" || target.roleId === "7") return;
+        ba3atiKabeerConvertSafeTargets.add(entry.target);
+      });
+    }
+
     // Update players in ba3atiTargets but not in al3omdaTargets
-    console.log(room.damazeenProtection);
     if (!room.damazeenProtection) {
       room.players.forEach((player) => {
         if (player.status === "dead") return;
         if (
           ba3atiTargets.includes(player.player._id.toString()) &&
+          !ba3atiKabeerConvertSafeTargets.has(player.player._id.toString()) &&
           !al3omdatargets.has(player.player._id.toString())
         ) {
           player.status = "dead"; // Mark as dead
@@ -40,7 +55,24 @@ module.exports.claculateResult = async (io, roomId) => {
       }
     });
 
-    // Snapshot after ba3ati/damazeen kills, before ballah/abuJanzeer
+    // Ba3ati Kabeer kill — same blocking rules as regular ba3ati (blocked by al3omda + damazeen protection)
+    const ba3atiKabeerKillTargets = room.ba3atiKabeerTargets.map(
+      (t) => t.target,
+    );
+    if (!room.damazeenProtection) {
+      room.players.forEach((player) => {
+        if (player.status === "dead") return;
+        if (
+          ba3atiKabeerKillTargets.includes(player.player._id.toString()) &&
+          !ba3atiKabeerConvertSafeTargets.has(player.player._id.toString()) &&
+          !al3omdatargets.has(player.player._id.toString())
+        ) {
+          player.status = "dead";
+        }
+      });
+    }
+
+    // Snapshot after ba3ati/damazeen/ba3atiKabeer kills, before ballah/abuJanzeer
     const beforeBallah = {};
     room.players.forEach((p) => {
       beforeBallah[p.player._id.toString()] = p.status;
@@ -82,21 +114,11 @@ module.exports.claculateResult = async (io, roomId) => {
       }
     });
 
-    // Ba3ati Kabeer kill — same blocking rules as regular ba3ati (blocked by al3omda + damazeen protection)
-    const ba3atiKabeerKillTargets = room.ba3atiKabeerTargets.map(
-      (t) => t.target,
-    );
-    if (!room.damazeenProtection) {
-      room.players.forEach((player) => {
-        if (player.status === "dead") return;
-        if (
-          ba3atiKabeerKillTargets.includes(player.player._id.toString()) &&
-          !al3omdatargets.has(player.player._id.toString())
-        ) {
-          player.status = "dead";
-        }
-      });
-    }
+    // Snapshot immediately after Abu Janzeer kills (for accurate Abu attribution)
+    const afterAbuJanzeer = {};
+    room.players.forEach((p) => {
+      afterAbuJanzeer[p.player._id.toString()] = p.status;
+    });
 
     // Ba3ati Kabeer convert — converts target to ba3ati (roleId "1") if not protected
     const ba3atiKabeerConverted = [];
@@ -108,6 +130,7 @@ module.exports.claculateResult = async (io, roomId) => {
       // Blocked by al3omda protection and damazeen protection
       if (room.damazeenProtection) return;
       if (al3omdatargets.has(entry.target)) return;
+      if (target.roleId === "1" || target.roleId === "7") return;
       // Convert target to ba3ati
       target.roleId = "1";
       ba3atiKabeerConverted.push({
@@ -130,7 +153,7 @@ module.exports.claculateResult = async (io, roomId) => {
       .filter(
         (p) =>
           beforeAbuJanzeer[p.player._id.toString()] === "alive" &&
-          p.status === "dead",
+          afterAbuJanzeer[p.player._id.toString()] === "dead",
       )
       .map((p) => p.player._id.toString());
 
