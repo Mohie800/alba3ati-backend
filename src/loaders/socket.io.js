@@ -20,6 +20,7 @@ const {
   skipNightAction,
   ba3atiKabeerAction,
   ba3atiKabeerConvert,
+  jenabuAction,
 } = require("../api/game/room.actions");
 const { voteSubmit, voteSkip } = require("../api/game/votes.game");
 const { skipDiscussionVote } = require("../api/game/skipDiscussion.game");
@@ -401,6 +402,7 @@ module.exports = (server) => {
     socket.on("ba3atiKabeerConvert", (arg) =>
       ba3atiKabeerConvert(io, socket, arg),
     );
+    socket.on("jenabuAction", (arg) => jenabuAction(io, socket, arg));
     socket.on("skipNightAction", (arg) => skipNightAction(io, socket, arg));
     //................................................................
 

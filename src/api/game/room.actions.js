@@ -395,3 +395,66 @@ exports.ba3atiKabeerConvert = async (
     return;
   }
 };
+
+exports.jenabuAction = async (
+  io,
+  socket,
+  { roomId, target1Id, target2Id, playerId },
+) => {
+  try {
+    const room = await Room.findOne({ roomId }).populate("players.player");
+    if (!room) return;
+
+    // Validate both targets are alive and different
+    if (target1Id === target2Id) return;
+    const target1Player = room.players.find(
+      (p) => p.player._id.toString() === target1Id,
+    );
+    const target2Player = room.players.find(
+      (p) => p.player._id.toString() === target2Id,
+    );
+    if (!target1Player || target1Player.status !== "alive") return;
+    if (!target2Player || target2Player.status !== "alive") return;
+
+    // Determine team for each target based on their current roleId
+    const getTeam = (roleId) => {
+      if (roleId === "1" || roleId === "7") return "ba3ati";
+      if (roleId === "5") return "abuJanzeer";
+      return "villagers";
+    };
+    const sameTeam =
+      getTeam(target1Player.roleId) === getTeam(target2Player.roleId);
+
+    // Privately reveal the result to the requesting socket
+    socket.emit("jenabuReveal", {
+      target1Id,
+      target1Name: target1Player.player.name,
+      target2Id,
+      target2Name: target2Player.player.name,
+      sameTeam,
+    });
+
+    // Atomically update player status and push targets
+    const updated = await Room.findOneAndUpdate(
+      playerElemMatch(roomId, playerId),
+      {
+        $set: { "players.$.playStatus": "done" },
+        $push: {
+          jenabuTargets: {
+            player: playerId,
+            target1: target1Id,
+            target2: target2Id,
+          },
+        },
+      },
+      { new: true },
+    );
+    if (!updated) return;
+
+    await resoveAction(roomId, io, socket);
+    return;
+  } catch (error) {
+    console.log(error);
+    return;
+  }
+};

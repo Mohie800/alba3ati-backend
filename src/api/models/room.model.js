@@ -54,6 +54,13 @@ const RoomSchema = new mongoose.Schema(
       { player: { type: String }, target: { type: String } },
     ],
     ba3atiKabeerConvertUsedBy: [{ type: String }],
+    jenabuTargets: [
+      {
+        player: { type: String },
+        target1: { type: String },
+        target2: { type: String },
+      },
+    ],
     rematchAccepted: [{ type: String }],
   },
   { timestamps: true },

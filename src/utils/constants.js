@@ -6,6 +6,7 @@ exports.ROLES = [
   { id: "5", name: "ابو جنزير", color: "#F1C40F" },
   { id: "6", name: "بله اب سيف", color: "#D35400" },
   { id: "7", name: "بعاتي كبير", color: "#1A5276" },
+  { id: "8", name: "جنابو", color: "#2E86C1" },
 ];
 
 exports.ROUND_TIME = 150;

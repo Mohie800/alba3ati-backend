@@ -18,6 +18,7 @@ const resetPlayingStatus = async (roomId) => {
     room.ballahTargets = [];
     room.ba3atiKabeerTargets = [];
     room.ba3atiKabeerConvertTargets = [];
+    room.jenabuTargets = [];
     room.damazeenProtection = false;
     await room.save();
     clearSkipVotes(roomId);
@@ -55,7 +56,7 @@ exports.claculateVoteResult = async (io, roomId) => {
     io.to(roomId).emit("vote-res", { room, eliminated: null });
   } else {
     const eliminatedPlayer = room.players.find(
-      (p) => p.player._id == potentialEliminated[0]
+      (p) => p.player._id == potentialEliminated[0],
     );
     if (!eliminatedPlayer) return;
     eliminatedPlayer.status = "dead";

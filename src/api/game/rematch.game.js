@@ -2,7 +2,9 @@ const Room = require("../models/room.model");
 const { clearSkipVotes } = require("./skipDiscussion.game");
 const { clearMutedPlayers } = require("./mutePlayer.game");
 const { cancelTimer, startTimer } = require("./timer.game");
-const { calculateRandomDistribution } = require("../../utils/randomDistribution");
+const {
+  calculateRandomDistribution,
+} = require("../../utils/randomDistribution");
 const { claculateResult } = require("./calculate.game");
 const {
   ROUND_TIME,
@@ -30,7 +32,7 @@ const startRematch = async (io, socket, { roomId }) => {
 
     // Verify the player is actually in this room
     const inRoom = room.players.some(
-      (p) => p.player._id.toString() === socket.playerId
+      (p) => p.player._id.toString() === socket.playerId,
     );
     if (!inRoom) return;
 
@@ -81,7 +83,7 @@ const acceptRematch = async (io, socket, { roomId }) => {
 
     // Check player is in the room
     const inRoom = room.players.some(
-      (p) => p.player._id.toString() === playerId
+      (p) => p.player._id.toString() === playerId,
     );
     if (!inRoom) return;
 
@@ -132,7 +134,7 @@ const beginRematch = async (io, socket, { roomId }) => {
 
     // Filter to accepted AND connected players
     const eligibleIds = room.rematchAccepted.filter((id) =>
-      connectedIds.has(id)
+      connectedIds.has(id),
     );
 
     if (eligibleIds.length < 2) {
@@ -144,7 +146,7 @@ const beginRematch = async (io, socket, { roomId }) => {
 
     // Remove players who didn't accept or aren't connected
     room.players = room.players.filter((p) =>
-      eligibleIds.includes(p.player._id.toString())
+      eligibleIds.includes(p.player._id.toString()),
     );
 
     resetRoomForRematch(room);
@@ -154,7 +156,7 @@ const beginRematch = async (io, socket, { roomId }) => {
     } else {
       await room.save();
       const updatedRoom = await Room.findOne({ roomId }).populate(
-        "players.player"
+        "players.player",
       );
       io.to(roomId).emit("rematchBegin", { room: updatedRoom });
     }
@@ -175,13 +177,13 @@ const rematchTimeout = async (io, roomId) => {
 
     const connectedIds = getConnectedPlayerIds(io, roomId);
     const eligibleIds = room.rematchAccepted.filter((id) =>
-      connectedIds.has(id)
+      connectedIds.has(id),
     );
 
     if (eligibleIds.length >= 2) {
       // Auto-begin with accepted + connected players
       room.players = room.players.filter((p) =>
-        eligibleIds.includes(p.player._id.toString())
+        eligibleIds.includes(p.player._id.toString()),
       );
       resetRoomForRematch(room);
 
@@ -190,7 +192,7 @@ const rematchTimeout = async (io, roomId) => {
       } else {
         await room.save();
         const updatedRoom = await Room.findOne({ roomId }).populate(
-          "players.player"
+          "players.player",
         );
         io.to(roomId).emit("rematchBegin", { room: updatedRoom });
       }
@@ -245,6 +247,7 @@ const resetRoomForRematch = (room) => {
   room.ba3atiKabeerTargets = [];
   room.ba3atiKabeerConvertTargets = [];
   room.ba3atiKabeerConvertUsedBy = [];
+  room.jenabuTargets = [];
   room.lastAl3omdaTargets = new Map();
 };
 
@@ -266,7 +269,12 @@ const autoStartQuickPlayRematch = async (io, room) => {
   });
 
   if (rolePool.length < room.players.length) {
-    console.error("[Rematch] Role pool size mismatch:", rolePool.length, "vs", room.players.length);
+    console.error(
+      "[Rematch] Role pool size mismatch:",
+      rolePool.length,
+      "vs",
+      room.players.length,
+    );
     return;
   }
 
