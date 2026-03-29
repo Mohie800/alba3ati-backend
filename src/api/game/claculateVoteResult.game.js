@@ -3,6 +3,7 @@ const res = require("./results.game");
 const { startTimer } = require("./timer.game");
 const { clearSkipVotes } = require("./skipDiscussion.game");
 const { clearMutedPlayers } = require("./mutePlayer.game");
+const { clearRoleDeclarations } = require("./declareRole.game");
 const resetPlayingStatus = async (roomId) => {
   try {
     const room = await Room.findOne({ roomId });
@@ -23,6 +24,7 @@ const resetPlayingStatus = async (roomId) => {
     await room.save();
     clearSkipVotes(roomId);
     clearMutedPlayers(roomId);
+    clearRoleDeclarations(roomId);
     return;
   } catch (error) {
     console.log(error);

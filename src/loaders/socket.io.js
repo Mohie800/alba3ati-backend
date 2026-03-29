@@ -28,6 +28,10 @@ const {
   mutePlayerToggle,
   getMutedPlayers,
 } = require("../api/game/mutePlayer.game");
+const {
+  handleDeclareRole,
+  clearRoleDeclarations,
+} = require("../api/game/declareRole.game");
 const { getRemainingTime } = require("../api/game/timer.game");
 const {
   getActiveRooms,
@@ -412,6 +416,7 @@ module.exports = (server) => {
     socket.on("skipVote", (arg) => voteSkip(io, socket, arg));
     socket.on("skipDiscussion", (arg) => skipDiscussionVote(io, socket, arg));
     socket.on("mutePlayer", (arg) => mutePlayerToggle(io, socket, arg));
+    socket.on("declareRole", (arg) => handleDeclareRole(io, socket, arg));
     //............................................................
 
     //----------------------------------------------------------------

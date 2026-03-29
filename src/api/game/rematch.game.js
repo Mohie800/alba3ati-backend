@@ -1,6 +1,7 @@
 const Room = require("../models/room.model");
 const { clearSkipVotes } = require("./skipDiscussion.game");
 const { clearMutedPlayers } = require("./mutePlayer.game");
+const { clearRoleDeclarations } = require("./declareRole.game");
 const { cancelTimer, startTimer } = require("./timer.game");
 const {
   calculateRandomDistribution,
@@ -214,6 +215,7 @@ const resetRoomForRematch = (room) => {
   // Clear in-memory state from previous game
   clearSkipVotes(room.roomId);
   clearMutedPlayers(room.roomId);
+  clearRoleDeclarations(room.roomId);
   cancelTimer(room.roomId);
 
   room.status = "playing";
