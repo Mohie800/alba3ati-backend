@@ -1,5 +1,7 @@
 const Room = require("../models/room.model");
-const { calculateRandomDistribution } = require("../../utils/randomDistribution");
+const {
+  calculateRandomDistribution,
+} = require("../../utils/randomDistribution");
 const { startTimer } = require("./timer.game");
 const { claculateResult } = require("./calculate.game");
 const {
@@ -9,6 +11,10 @@ const {
   QUICK_PLAY_COUNTDOWN,
   QUICK_PLAY_DISCUSSION_TIME,
 } = require("../../utils/constants");
+const {
+  isPlayerInWaitingGracePeriod,
+  cancelWaitingGracePeriod,
+} = require("./disconnect.game");
 
 // In-memory state
 let activeQuickPlayRoomId = null;
@@ -41,7 +47,7 @@ const findOrCreateQuickPlayRoom = async (io, socket, playerId) => {
     // Try to use the active quick play room
     if (activeQuickPlayRoomId) {
       room = await Room.findOne({ roomId: activeQuickPlayRoomId }).populate(
-        "players.player"
+        "players.player",
       );
 
       // If room no longer valid, clear it
@@ -53,9 +59,17 @@ const findOrCreateQuickPlayRoom = async (io, socket, playerId) => {
       // Check if player is already in this room (reconnect)
       if (room) {
         const alreadyInRoom = room.players.some(
-          (p) => p.player._id.toString() === playerId
+          (p) => p.player._id.toString() === playerId,
         );
         if (alreadyInRoom) {
+          const wasInWaitingGrace = isPlayerInWaitingGracePeriod(playerId);
+          if (!wasInWaitingGrace) {
+            socket.emit("joinError", { message: "Already joined this room" });
+            return;
+          }
+
+          cancelWaitingGracePeriod(room.roomId, playerId);
+
           // Rejoin socket room
           joinRoom(io, socket, room.roomId);
           socket.gameRoomId = room.roomId;
@@ -98,7 +112,7 @@ const findOrCreateQuickPlayRoom = async (io, socket, playerId) => {
     room = await Room.findByIdAndUpdate(
       room._id,
       { $push: { players: { player: playerId } } },
-      { new: true }
+      { new: true },
     ).populate("players.player");
 
     joinRoom(io, socket, room.roomId);
@@ -226,7 +240,7 @@ const autoStartQuickPlayGame = async (io, roomId) => {
     io.emit("roomsUpdate", rooms);
 
     console.log(
-      `[QuickPlay] Game auto-started in room ${roomId} with ${room.players.length} players`
+      `[QuickPlay] Game auto-started in room ${roomId} with ${room.players.length} players`,
     );
   } catch (error) {
     console.error("[QuickPlay] Error in autoStartQuickPlayGame:", error);
@@ -242,7 +256,7 @@ const handleQuickPlayLeave = async (io, roomId, playerId) => {
     if (!room) return;
 
     room.players = room.players.filter(
-      (p) => p.player._id.toString() !== playerId
+      (p) => p.player._id.toString() !== playerId,
     );
 
     if (room.players.length === 0) {

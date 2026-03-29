@@ -148,23 +148,23 @@ module.exports = (server) => {
           players: [{ player: host }],
         });
 
-        const roomDetails = await Room.findOne({ roomId }).populate(
-          "players.player",
-        );
+        await room.populate("players.player");
+
         // Join the room
         joinRoom(io, socket, roomId);
         socket.gameRoomId = roomId;
         socket.playerId = host;
 
         // Notify the host
-        socket.emit("roomCreated", {
-          room: roomDetails,
-        });
+        socket.emit("roomCreated", { room });
 
         // Notify all clients in the room
         io.to(roomId).emit("roomUpdated", { room });
-        const rooms = await getActiveRooms();
-        io.emit("roomsUpdate", rooms);
+
+        // Update public rooms list without blocking the response
+        getActiveRooms()
+          .then((rooms) => io.emit("roomsUpdate", rooms))
+          .catch((err) => console.error("Error updating rooms list:", err));
       } catch (error) {
         console.error("Error creating room:", error);
         socket.emit("error", { message: "Failed to create room" });
@@ -208,11 +208,20 @@ module.exports = (server) => {
             return;
           }
 
+          const wasInGrace = isPlayerInGracePeriod(player);
+          const wasInWaitingGrace = isPlayerInWaitingGracePeriod(player);
+
+          // Block duplicate joins for players who are already connected in the room.
+          // Rejoin is only allowed when the player is in a disconnect grace period.
+          if (!wasInGrace && !wasInWaitingGrace) {
+            socket.emit("joinError", { message: "Already joined this room" });
+            return;
+          }
+
           // Cancel grace periods if player was disconnected
-          if (isPlayerInGracePeriod(player)) {
+          if (wasInGrace) {
             cancelGracePeriod(io, roomId, player);
           }
-          const wasInWaitingGrace = isPlayerInWaitingGracePeriod(player);
           if (wasInWaitingGrace) {
             cancelWaitingGracePeriod(roomId, player);
           }
