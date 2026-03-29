@@ -2,7 +2,10 @@ const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
   name: { type: String },
-  email: { type: String, unique: true, sparse: true }, // Optional for future use
+  email: { type: String, unique: true, sparse: true },
+  googleId: { type: String, unique: true, sparse: true },
+  authProvider: { type: String, enum: ["guest", "google"], default: "guest" },
+  profilePicture: { type: String, default: null },
   deviceId: { type: String, default: null },
   frame: { type: String, default: null }, // Avatar frame ID (e.g. "wreath", "wings1")
   expoPushToken: { type: String, default: null },
@@ -24,5 +27,6 @@ const userSchema = new mongoose.Schema({
 
 userSchema.index({ "stats.gamesWon": -1, "stats.gamesPlayed": 1 });
 userSchema.index({ deviceId: 1 });
+userSchema.index({ googleId: 1 }, { sparse: true });
 
 module.exports = mongoose.model("User", userSchema);

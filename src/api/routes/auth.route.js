@@ -15,6 +15,15 @@ router.get("/check-ban", authController.checkBan);
 // DELETE /api/auth/delete-account
 router.delete("/delete-account", authController.deleteAccount);
 
+// POST /api/auth/google-register
+router.post("/google-register", authController.googleRegister);
+
+// POST /api/auth/google-login
+router.post("/google-login", authController.googleLogin);
+
+// POST /api/auth/link-google
+router.post("/link-google", authController.linkGoogle);
+
 // POST /api/auth/push-token
 router.post("/push-token", notificationController.savePushToken);
 

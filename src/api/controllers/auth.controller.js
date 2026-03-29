@@ -2,6 +2,7 @@ const User = require("../models/user.model");
 const BannedDevice = require("../models/bannedDevice.model");
 const config = require("../../config/config");
 const { recordNewUser } = require("../game/dailyStats.game");
+const { verifyGoogleToken } = require("../../utils/google");
 
 const normalizeDeviceId = (id) => (id ? id.trim().toLowerCase() : null);
 
@@ -37,7 +38,7 @@ exports.register = async (req, res) => {
     }
 
     // Create a new user
-    const user = await User.create({ name, deviceId: deviceId || null });
+    const user = await User.create({ name, deviceId: deviceId || null, authProvider: "guest" });
     recordNewUser();
 
     // Respond with user data and token
@@ -82,10 +83,12 @@ exports.deleteAccount = async (req, res) => {
       return res.status(404).json({ success: false, error: "User not found" });
     }
 
-    // Verify device ID matches (prevent deleting someone else's account)
-    const normalizedDeviceId = normalizeDeviceId(deviceId);
-    if (normalizedDeviceId && user.deviceId && normalizeDeviceId(user.deviceId) !== normalizedDeviceId) {
-      return res.status(403).json({ success: false, error: "Device mismatch" });
+    // Verify device ID matches (skip for Google users)
+    if (user.authProvider !== "google") {
+      const normalizedDeviceId = normalizeDeviceId(deviceId);
+      if (normalizedDeviceId && user.deviceId && normalizeDeviceId(user.deviceId) !== normalizedDeviceId) {
+        return res.status(403).json({ success: false, error: "Device mismatch" });
+      }
     }
 
     // Delete all user-related data
@@ -170,5 +173,208 @@ exports.checkBan = async (req, res) => {
   } catch (error) {
     console.error("Check ban error:", error);
     res.status(500).json({ success: false, error: "Server error" });
+  }
+};
+
+exports.googleRegister = async (req, res) => {
+  try {
+    const { idToken, deviceId } = req.body;
+
+    if (!idToken) {
+      return res.status(400).json({ success: false, error: "idToken is required" });
+    }
+
+    const payload = await verifyGoogleToken(idToken);
+
+    // Check if Google account is already linked
+    const existingUser = await User.findOne({
+      $or: [{ googleId: payload.googleId }, { email: payload.email }],
+    });
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        code: "ALREADY_LINKED",
+        error: "هذا الحساب مرتبط بالفعل، قم بتسجيل الدخول",
+      });
+    }
+
+    // Check device ban
+    const normalizedDeviceId = normalizeDeviceId(deviceId);
+    if (normalizedDeviceId) {
+      const banned = await BannedDevice.findOne({ deviceId: normalizedDeviceId });
+      if (banned) {
+        if (banned.expiresAt && banned.expiresAt < new Date()) {
+          await BannedDevice.deleteOne({ _id: banned._id });
+        } else {
+          return res.status(403).json({
+            success: false,
+            code: "DEVICE_BANNED",
+            error: "This device has been banned",
+            reason: banned.reason,
+          });
+        }
+      }
+    }
+
+    const user = await User.create({
+      name: payload.name,
+      email: payload.email,
+      googleId: payload.googleId,
+      profilePicture: payload.picture,
+      authProvider: "google",
+      deviceId: normalizedDeviceId,
+    });
+    recordNewUser();
+
+    res.status(201).json({
+      success: true,
+      data: {
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          authProvider: user.authProvider,
+          createdAt: user.createdAt,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Google register error:", error);
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        code: "ALREADY_LINKED",
+        error: "هذا الحساب مرتبط بالفعل، قم بتسجيل الدخول",
+      });
+    }
+    res.status(500).json({ success: false, error: "حدث خطأ، حاول مرة أخرى" });
+  }
+};
+
+exports.googleLogin = async (req, res) => {
+  try {
+    const { idToken, deviceId } = req.body;
+
+    if (!idToken) {
+      return res.status(400).json({ success: false, error: "idToken is required" });
+    }
+
+    const payload = await verifyGoogleToken(idToken);
+
+    const user = await User.findOne({ googleId: payload.googleId });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        code: "NOT_FOUND",
+        error: "لم يتم العثور على حساب، قم بالتسجيل أولاً",
+      });
+    }
+
+    // Update deviceId
+    const normalizedDeviceId = normalizeDeviceId(deviceId);
+    if (normalizedDeviceId) {
+      user.deviceId = normalizedDeviceId;
+      await user.save();
+    }
+
+    // Check device ban
+    if (normalizedDeviceId) {
+      const banned = await BannedDevice.findOne({ deviceId: normalizedDeviceId });
+      if (banned) {
+        if (banned.expiresAt && banned.expiresAt < new Date()) {
+          await BannedDevice.deleteOne({ _id: banned._id });
+        } else {
+          return res.status(403).json({
+            success: false,
+            code: "DEVICE_BANNED",
+            error: "This device has been banned",
+            reason: banned.reason,
+          });
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          authProvider: user.authProvider,
+          createdAt: user.createdAt,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Google login error:", error);
+    res.status(500).json({ success: false, error: "حدث خطأ، حاول مرة أخرى" });
+  }
+};
+
+exports.linkGoogle = async (req, res) => {
+  try {
+    const { userId, idToken } = req.body;
+
+    if (!userId || !idToken) {
+      return res.status(400).json({ success: false, error: "userId and idToken are required" });
+    }
+
+    const payload = await verifyGoogleToken(idToken);
+
+    // Check if Google account is already linked to another user
+    const existingUser = await User.findOne({
+      $or: [{ googleId: payload.googleId }, { email: payload.email }],
+      _id: { $ne: userId },
+    });
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        code: "ALREADY_LINKED",
+        error: "هذا الحساب مرتبط بحساب آخر",
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+
+    if (user.authProvider === "google") {
+      return res.status(400).json({
+        success: false,
+        code: "ALREADY_LINKED",
+        error: "حسابك مرتبط بالفعل بحساب Google",
+      });
+    }
+
+    // Link Google account in-place (preserves _id, stats, everything)
+    user.googleId = payload.googleId;
+    user.email = payload.email;
+    user.profilePicture = payload.picture;
+    user.authProvider = "google";
+    await user.save();
+
+    res.json({
+      success: true,
+      data: {
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          authProvider: user.authProvider,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Link Google error:", error);
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        code: "ALREADY_LINKED",
+        error: "هذا الحساب مرتبط بحساب آخر",
+      });
+    }
+    res.status(500).json({ success: false, error: "حدث خطأ، حاول مرة أخرى" });
   }
 };
