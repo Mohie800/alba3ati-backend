@@ -12,6 +12,12 @@ const appSettingsSchema = new mongoose.Schema(
       type: String,
       default: "اللعبة تحت الصيانة حالياً، يرجى المحاولة لاحقاً",
     },
+    coinRewards: {
+      gameComplete: { type: Number, default: 10 },
+      gameWin: { type: Number, default: 20 },
+      adReward: { type: Number, default: 15 },
+      maxAdsPerDay: { type: Number, default: 5 },
+    },
     communityLinks: {
       enabled: { type: Boolean, default: false },
       whatsapp: {

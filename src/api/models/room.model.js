@@ -16,6 +16,7 @@ const RoomSchema = new mongoose.Schema(
           enum: ["playing", "done"],
           default: "playing",
         },
+        leftMidGame: { type: Boolean, default: false },
       },
     ],
     status: {

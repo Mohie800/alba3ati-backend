@@ -7,6 +7,8 @@ const GameRound = require("../api/models/gameRound.model");
 const {
   sendPushNotification,
 } = require("../api/services/pushNotification.service");
+const presenceService = require("../api/services/presence.service");
+const friendshipService = require("../api/services/friendship.service");
 const { assignRoles } = require("../api/game/roles.game");
 const {
   ba3atiAction,
@@ -75,6 +77,70 @@ module.exports = (server) => {
       .toString(36)
       .substring(2, 2 + length);
   }
+
+  // userId → Set of socketIds (for targeted events and presence)
+  const userSockets = new Map();
+
+  function emitToUser(userId, event, data) {
+    const sockets = userSockets.get(userId.toString());
+    if (sockets) {
+      for (const socketId of sockets) {
+        io.to(socketId).emit(event, data);
+      }
+    }
+  }
+
+  // Inject emitToUser into friendship service so it can emit events on request/accept/etc.
+  friendshipService.setEmitToUser(emitToUser);
+
+  /**
+   * Notify a player's online friends that they joined/created a room.
+   * Throttled to once per 5 minutes per (player, friend) pair.
+   */
+  async function notifyFriendsJoinedRoom(userId, playerName, roomId, isPublic) {
+    try {
+      const [friendIds, player] = await Promise.all([
+        friendshipService.getFriendIds(userId.toString()),
+        User.findById(userId).select("name"),
+      ]);
+      const name = player?.name || playerName;
+
+      for (const friendId of friendIds) {
+        const allowed = friendshipService.checkAndSetNotifyThrottle(
+          userId.toString(),
+          friendId,
+        );
+        if (!allowed) continue;
+
+        if (presenceService.isOnline(friendId)) {
+          // Real-time event for online friends
+          emitToUser(friendId, "friendJoinedRoom", {
+            friend: { _id: userId, name },
+            roomId,
+            isPublic: !!isPublic,
+          });
+        }
+        // Push notification for offline friends is handled by sendFriendRoomNotification
+      }
+
+      // Send push to offline friends (non-blocking)
+      const offlineFriendIds = friendIds.filter(
+        (id) => !presenceService.isOnline(id),
+      );
+      if (offlineFriendIds.length > 0) {
+        sendPushNotification({
+          title: "صديقك يلعب!",
+          body: `${name} ينتظر في غرفة — تعال العب معه!`,
+          data: { type: "friend_room", roomId },
+          userIds: offlineFriendIds,
+          type: "targeted",
+        }).catch(() => {});
+      }
+    } catch (err) {
+      // Non-critical
+    }
+  }
+
   // Initialize chat namespace
   initChat(io);
 
@@ -127,6 +193,37 @@ module.exports = (server) => {
     socket.gameRoomId = null;
     socket.playerId = null;
 
+    // Register socket for presence tracking once playerId is known
+    // (playerId is set on joinRoom/createRoom/quickPlay — we handle presence there)
+    function registerUserSocket(playerId) {
+      if (!playerId) return;
+      if (!userSockets.has(playerId)) userSockets.set(playerId, new Set());
+      const wasOffline = userSockets.get(playerId).size === 0;
+      userSockets.get(playerId).add(socket.id);
+
+      if (wasOffline) {
+        presenceService.setOnline(playerId);
+        // Notify friends of online status
+        notifyFriendsPresence(playerId, "online");
+      }
+    }
+
+    async function notifyFriendsPresence(userId, status, roomId) {
+      try {
+        const friendIds = await friendshipService.getFriendIds(userId);
+        for (const friendId of friendIds) {
+          if (presenceService.isOnline(friendId)) {
+            emitToUser(friendId, "friendPresenceUpdate", {
+              userId,
+              presence: { status, roomId },
+            });
+          }
+        }
+      } catch (err) {
+        // Non-critical — don't crash on presence broadcast errors
+      }
+    }
+
     // Handle room creation
     socket.on("createRoom", async (host) => {
       try {
@@ -154,6 +251,19 @@ module.exports = (server) => {
         joinRoom(io, socket, roomId);
         socket.gameRoomId = roomId;
         socket.playerId = host;
+
+        // Presence: register socket and broadcast to friends
+        registerUserSocket(host);
+        presenceService.setPlaying(host, roomId);
+        notifyFriendsPresence(host, "playing", roomId);
+
+        // Notify friends that this player created a room
+        notifyFriendsJoinedRoom(
+          host,
+          room.host?.toString?.() || host,
+          roomId,
+          room.isPublic,
+        ).catch(() => {});
 
         // Notify the host
         socket.emit("roomCreated", { room });
@@ -233,6 +343,11 @@ module.exports = (server) => {
           socket.gameRoomId = roomId;
           socket.playerId = player;
 
+          // Presence: register socket on reconnect
+          registerUserSocket(player);
+          presenceService.setPlaying(player, roomId);
+          notifyFriendsPresence(player, "playing", roomId);
+
           if (room.status === "playing") {
             // Mid-game rejoin: send gameReconnected so frontend restores game state
             const me = room.players.find(
@@ -289,6 +404,17 @@ module.exports = (server) => {
           joinRoom(io, socket, roomId);
           socket.gameRoomId = roomId;
           socket.playerId = player;
+
+          // Presence: set playing and notify friends
+          registerUserSocket(player);
+          presenceService.setPlaying(player, roomId);
+          notifyFriendsPresence(player, "playing", roomId);
+          notifyFriendsJoinedRoom(
+            player,
+            player,
+            roomId,
+            updatedRoom.isPublic,
+          ).catch(() => {});
 
           socket.emit("roomJoined", updatedRoom);
           io.to(roomId).emit("playerJoined", updatedRoom);
@@ -368,6 +494,8 @@ module.exports = (server) => {
           });
           return;
         }
+        // Register presence before entering quick play
+        registerUserSocket(playerId);
         await findOrCreateQuickPlayRoom(io, socket, playerId);
       } catch (error) {
         console.error("[QuickPlay] Error:", error);
@@ -375,20 +503,77 @@ module.exports = (server) => {
       }
     });
 
+    // Invite a friend to your current room
+    socket.on("inviteFriend", async ({ friendId, roomId }) => {
+      try {
+        const playerId = socket.playerId;
+        if (!playerId || !friendId || !roomId) return;
+
+        // Verify they are actually friends
+        const friendIds = await friendshipService.getFriendIds(playerId);
+        if (!friendIds.includes(friendId)) return;
+
+        // Only allow inviting online friends
+        if (!presenceService.isOnline(friendId)) {
+          // Send push notification instead
+          const sender = await User.findById(playerId).select("name");
+          if (sender) {
+            await sendPushNotification({
+              title: "دعوة للعب",
+              body: `${sender.name} يدعوك للانضمام لغرفته!`,
+              data: { type: "friend_invite", roomId },
+              userIds: [friendId],
+              type: "targeted",
+            }).catch(() => {});
+          }
+          return;
+        }
+
+        const sender = await User.findById(playerId).select("name frame");
+        emitToUser(friendId, "friendInvite", {
+          from: { _id: playerId, name: sender?.name },
+          roomId,
+        });
+      } catch (err) {
+        console.error("[inviteFriend] Error:", err);
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log("Client disconnected");
+      const playerId = socket.playerId;
       if (socket.gameRoomId) {
-        leaveRoom(io, socket, socket.gameRoomId, socket.playerId, false);
+        leaveRoom(io, socket, socket.gameRoomId, playerId, false);
         socket.gameRoomId = null;
         socket.playerId = null;
+      }
+
+      // Clean up userSockets map
+      if (playerId) {
+        const sockets = userSockets.get(playerId);
+        if (sockets) {
+          sockets.delete(socket.id);
+          if (sockets.size === 0) {
+            userSockets.delete(playerId);
+            presenceService.setOffline(playerId);
+            notifyFriendsPresence(playerId, "offline");
+          }
+        }
       }
     });
 
     socket.on("home", () => {
+      const playerId = socket.playerId;
       if (socket.gameRoomId) {
-        leaveRoom(io, socket, socket.gameRoomId, socket.playerId, true);
+        leaveRoom(io, socket, socket.gameRoomId, playerId, true);
         socket.gameRoomId = null;
         socket.playerId = null;
+      }
+
+      // Player left room but is still connected — set back to online
+      if (playerId && userSockets.has(playerId)) {
+        presenceService.setOnline(playerId);
+        notifyFriendsPresence(playerId, "online");
       }
     });
 

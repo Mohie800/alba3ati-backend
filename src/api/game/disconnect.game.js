@@ -68,9 +68,10 @@ const handleGracePeriodExpiry = async (io, roomId, playerId) => {
     );
     if (!player || player.status === "dead") return;
 
-    // Mark the disconnected player as dead and done
+    // Mark the disconnected player as dead, done, and left mid-game
     player.status = "dead";
     player.playStatus = "done";
+    player.leftMidGame = true;
     await room.save();
 
     // Remove from skip-discussion votes and re-check threshold

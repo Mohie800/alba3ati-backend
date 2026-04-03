@@ -162,28 +162,35 @@ exports.getGameDetail = async (req, res) => {
   }
 };
 
-const VALID_FRAME_IDS = [
-  "wreath",
-  "wreath2",
-  "wings1",
-  "wings2",
-  "wings3",
-  "wings4",
-  "wings5",
-  "wings6",
-];
+const ShopItem = require("../models/shopItem.model");
 
 exports.updatePlayerFrame = async (req, res) => {
   try {
     const { frame } = req.body;
-    if (
-      frame !== null &&
-      frame !== undefined &&
-      !VALID_FRAME_IDS.includes(frame)
-    ) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid frame ID" });
+    if (frame !== null && frame !== undefined) {
+      const validItem = await ShopItem.findOne({
+        itemId: frame,
+        isActive: true,
+      });
+      if (!validItem) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid frame ID" });
+      }
+    }
+    // Check ownership if setting a frame (null = removing frame, always allowed)
+    if (frame) {
+      const user = await User.findById(req.params.id).select("ownedFrames");
+      if (!user) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Player not found" });
+      }
+      if (!user.ownedFrames.includes(frame)) {
+        return res
+          .status(403)
+          .json({ success: false, message: "Frame not owned" });
+      }
     }
     const player = await User.findByIdAndUpdate(
       req.params.id,

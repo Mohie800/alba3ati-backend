@@ -10,6 +10,8 @@ const appSettingsController = require("../controllers/appSettings.controller");
 const notificationController = require("../controllers/notification.controller");
 const adController = require("../controllers/ad.controller");
 const dailyStatsController = require("../controllers/dailyStats.controller");
+const friendshipAdminController = require("../controllers/friendship.admin.controller");
+const shopAdminController = require("../controllers/shop.admin.controller");
 const upload = require("../middleware/upload");
 
 // Public
@@ -75,5 +77,32 @@ router.delete("/ads/:id", adminAuth, adController.deleteAd);
 
 // Daily Stats / Analytics
 router.get("/daily-stats", adminAuth, dailyStatsController.getDailyStats);
+
+// Friendships (admin)
+router.get(
+  "/players/:id/friends",
+  adminAuth,
+  friendshipAdminController.getPlayerFriends,
+);
+router.delete(
+  "/friendships/:id",
+  adminAuth,
+  friendshipAdminController.removeFriendship,
+);
+router.get(
+  "/friendship-stats",
+  adminAuth,
+  friendshipAdminController.getFriendshipStats,
+);
+
+// Shop Items (admin)
+router.get("/shop-items", adminAuth, shopAdminController.getShopItems);
+router.post("/shop-items", adminAuth, shopAdminController.createShopItem);
+router.put("/shop-items/:id", adminAuth, shopAdminController.updateShopItem);
+router.delete("/shop-items/:id", adminAuth, shopAdminController.deleteShopItem);
+
+// Player Coins (admin)
+router.get("/players/:id/coins", adminAuth, shopAdminController.getPlayerCoins);
+router.post("/players/:id/adjust-coins", adminAuth, shopAdminController.adjustPlayerCoins);
 
 module.exports = router;

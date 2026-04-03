@@ -45,9 +45,9 @@ module.exports.nightResults = async (io, roomId, voted) => {
       room.gamePhase = "gameOver";
       room.gameResult = "3";
       await room.save();
-      await updatePlayerStats(room, "3");
+      const coinRewards3 = await updatePlayerStats(room, "3");
       recordGameEnd(room, "3");
-      io.to(roomId).emit("gameOver", { room, win: "3" });
+      io.to(roomId).emit("gameOver", { room, win: "3", coinRewards: coinRewards3 });
     } else if (
       ba3atiCount > 0 &&
       ba3atiCount > villagersCount + abuJanzeerCount
@@ -56,9 +56,9 @@ module.exports.nightResults = async (io, roomId, voted) => {
       room.gamePhase = "gameOver";
       room.gameResult = "1";
       await room.save();
-      await updatePlayerStats(room, "1");
+      const coinRewards1 = await updatePlayerStats(room, "1");
       recordGameEnd(room, "1");
-      io.to(roomId).emit("gameOver", { room, win: "1" });
+      io.to(roomId).emit("gameOver", { room, win: "1", coinRewards: coinRewards1 });
     } else if (
       villagersCount > 0 &&
       ba3atiCount === 0 &&
@@ -68,16 +68,16 @@ module.exports.nightResults = async (io, roomId, voted) => {
       room.gamePhase = "gameOver";
       room.gameResult = "2";
       await room.save();
-      await updatePlayerStats(room, "2");
+      const coinRewards2 = await updatePlayerStats(room, "2");
       recordGameEnd(room, "2");
-      io.to(roomId).emit("gameOver", { room, win: "2" });
+      io.to(roomId).emit("gameOver", { room, win: "2", coinRewards: coinRewards2 });
     } else if (alivePlayers.length === 0) {
       room.gamePhase = "gameOver";
       room.gameResult = "0";
       await room.save();
-      await updatePlayerStats(room, "0");
+      const coinRewards0 = await updatePlayerStats(room, "0");
       recordGameEnd(room, "0");
-      io.to(roomId).emit("gameOver", { room, win: "0" });
+      io.to(roomId).emit("gameOver", { room, win: "0", coinRewards: coinRewards0 });
       // draw 0
     } else {
       // continue to the next night with the updated room status and players' statuses

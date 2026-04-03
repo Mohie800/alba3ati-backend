@@ -74,4 +74,48 @@ async function sendPushNotification({ title, body, data = {}, userIds, type = "b
   return notification;
 }
 
-module.exports = { sendPushNotification };
+/**
+ * Send a friend request push notification to a specific user.
+ */
+async function sendFriendRequestNotification(fromName, toUserId) {
+  return sendPushNotification({
+    title: "طلب صداقة جديد",
+    body: `${fromName} يريد إضافتك كصديق`,
+    data: { type: "friend_request" },
+    userIds: [toUserId],
+    type: "targeted",
+  });
+}
+
+/**
+ * Send a push notification that a friend is in a room.
+ */
+async function sendFriendRoomNotification(friendName, roomId, toUserIds) {
+  return sendPushNotification({
+    title: "صديقك يلعب!",
+    body: `${friendName} ينتظر في غرفة — تعال العب معه!`,
+    data: { type: "friend_room", roomId },
+    userIds: toUserIds,
+    type: "targeted",
+  });
+}
+
+/**
+ * Send a friend invite push notification.
+ */
+async function sendFriendInviteNotification(fromName, roomId, toUserId) {
+  return sendPushNotification({
+    title: "دعوة للعب",
+    body: `${fromName} يدعوك للانضمام لغرفته!`,
+    data: { type: "friend_invite", roomId },
+    userIds: [toUserId],
+    type: "targeted",
+  });
+}
+
+module.exports = {
+  sendPushNotification,
+  sendFriendRequestNotification,
+  sendFriendRoomNotification,
+  sendFriendInviteNotification,
+};

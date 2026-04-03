@@ -1,4 +1,6 @@
 const User = require("../models/user.model");
+const CoinTransaction = require("../models/coinTransaction.model");
+const AppSettings = require("../models/appSettings.model");
 
 // Determines if a player won based on their roleId and the gameResult
 function didPlayerWin(roleId, gameResult) {
@@ -11,9 +13,17 @@ function didPlayerWin(roleId, gameResult) {
 }
 
 // Updates stats for all players in a room after game ends
+// Returns coinRewards map: { [playerId]: { earned, newBalance } }
 async function updatePlayerStats(room, gameResult) {
   try {
+    // Load coin config from AppSettings
+    const settings = await AppSettings.getSettings();
+    const coinConfig = settings.coinRewards || {};
+    const gameCompleteCoins = coinConfig.gameComplete || 10;
+    const gameWinCoins = coinConfig.gameWin || 20;
+
     const bulkOps = [];
+    const coinAmounts = new Map(); // playerId -> earned coins
 
     for (const p of room.players) {
       const playerId =
@@ -35,6 +45,14 @@ async function updatePlayerStats(room, gameResult) {
       } else {
         inc["stats.gamesDraw"] = 1;
       }
+
+      // Coin rewards: skip players who left mid-game
+      let earned = 0;
+      if (!p.leftMidGame) {
+        earned = outcome === "win" ? gameWinCoins : gameCompleteCoins;
+        inc.coins = earned;
+      }
+      coinAmounts.set(playerId.toString(), earned);
 
       bulkOps.push({
         updateOne: {
@@ -95,8 +113,40 @@ async function updatePlayerStats(room, gameResult) {
     if (streakOps.length > 0) {
       await User.bulkWrite(streakOps);
     }
+
+    // Build coinRewards map with updated balances
+    const coinRewards = {};
+    const txDocs = [];
+
+    for (const [playerId, earned] of coinAmounts) {
+      const user = userMap.get(playerId);
+      if (!user) continue;
+      // user.coins was already incremented by bulkWrite, so it reflects the new balance
+      const newBalance = user.coins;
+      coinRewards[playerId] = { earned, newBalance };
+
+      if (earned > 0) {
+        txDocs.push({
+          user: user._id,
+          amount: earned,
+          balance: newBalance,
+          type: earned === gameWinCoins ? "game_win" : "game_complete",
+          meta: { roomId: room.roomId, gameResult },
+        });
+      }
+    }
+
+    // Fire-and-forget audit trail
+    if (txDocs.length > 0) {
+      CoinTransaction.insertMany(txDocs).catch((err) =>
+        console.error("Error inserting coin transactions:", err),
+      );
+    }
+
+    return coinRewards;
   } catch (error) {
     console.error("Error updating player stats:", error);
+    return {};
   }
 }
 

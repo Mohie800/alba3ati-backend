@@ -21,7 +21,9 @@ exports.register = async (req, res) => {
     // Check if device is banned
     const normalizedDeviceId = normalizeDeviceId(deviceId);
     if (normalizedDeviceId) {
-      const banned = await BannedDevice.findOne({ deviceId: normalizedDeviceId });
+      const banned = await BannedDevice.findOne({
+        deviceId: normalizedDeviceId,
+      });
       if (banned) {
         // Check if ban has expired
         if (banned.expiresAt && banned.expiresAt < new Date()) {
@@ -38,7 +40,11 @@ exports.register = async (req, res) => {
     }
 
     // Create a new user
-    const user = await User.create({ name, deviceId: deviceId || null, authProvider: "guest" });
+    const user = await User.create({
+      name,
+      deviceId: deviceId || null,
+      authProvider: "guest",
+    });
     recordNewUser();
 
     // Respond with user data and token
@@ -75,7 +81,9 @@ exports.deleteAccount = async (req, res) => {
     const { userId, deviceId } = req.body;
 
     if (!userId) {
-      return res.status(400).json({ success: false, error: "userId is required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "userId is required" });
     }
 
     const user = await User.findById(userId);
@@ -86,8 +94,14 @@ exports.deleteAccount = async (req, res) => {
     // Verify device ID matches (skip for Google users)
     if (user.authProvider !== "google") {
       const normalizedDeviceId = normalizeDeviceId(deviceId);
-      if (normalizedDeviceId && user.deviceId && normalizeDeviceId(user.deviceId) !== normalizedDeviceId) {
-        return res.status(403).json({ success: false, error: "Device mismatch" });
+      if (
+        normalizedDeviceId &&
+        user.deviceId &&
+        normalizeDeviceId(user.deviceId) !== normalizedDeviceId
+      ) {
+        return res
+          .status(403)
+          .json({ success: false, error: "Device mismatch" });
       }
     }
 
@@ -95,6 +109,19 @@ exports.deleteAccount = async (req, res) => {
     const Contact = require("../models/contact.model");
     const Report = require("../models/report.model");
     const Notification = require("../models/notification.model");
+    const Friendship = require("../models/friendship.model");
+
+    // Find accepted friendships to decrement friendCount on the other party
+    const acceptedFriendships = await Friendship.find({
+      status: "accepted",
+      $or: [{ requester: userId }, { recipient: userId }],
+    }).lean();
+
+    const friendUserIds = acceptedFriendships.map((f) => {
+      return f.requester.toString() === userId
+        ? f.recipient.toString()
+        : f.requester.toString();
+    });
 
     await Promise.all([
       // Delete user's contacts/messages
@@ -104,13 +131,29 @@ exports.deleteAccount = async (req, res) => {
       // Remove user from notification recipients
       Notification.updateMany(
         { recipients: userId },
-        { $pull: { recipients: userId } }
+        { $pull: { recipients: userId } },
       ),
+      // Delete all friendship records involving this user
+      Friendship.deleteMany({
+        $or: [{ requester: userId }, { recipient: userId }],
+      }),
+      // Decrement friendCount on all friends
+      ...(friendUserIds.length > 0
+        ? [
+            User.updateMany(
+              { _id: { $in: friendUserIds } },
+              { $inc: { friendCount: -1 } },
+            ),
+          ]
+        : []),
       // Delete the user
       User.findByIdAndDelete(userId),
     ]);
 
-    res.json({ success: true, message: "Account and all associated data deleted" });
+    res.json({
+      success: true,
+      message: "Account and all associated data deleted",
+    });
   } catch (error) {
     console.error("Delete account error:", error);
     res.status(500).json({ success: false, error: "Failed to delete account" });
@@ -131,7 +174,7 @@ exports.updateName = async (req, res) => {
     const user = await User.findByIdAndUpdate(
       userId,
       { name: name.trim() },
-      { new: true }
+      { new: true },
     );
 
     if (!user) {
@@ -153,10 +196,14 @@ exports.checkBan = async (req, res) => {
     const { deviceId } = req.query;
 
     if (!deviceId) {
-      return res.status(400).json({ success: false, error: "deviceId is required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "deviceId is required" });
     }
 
-    const banned = await BannedDevice.findOne({ deviceId: normalizeDeviceId(deviceId) });
+    const banned = await BannedDevice.findOne({
+      deviceId: normalizeDeviceId(deviceId),
+    });
 
     if (banned && banned.expiresAt && banned.expiresAt < new Date()) {
       await BannedDevice.deleteOne({ _id: banned._id });
@@ -181,7 +228,9 @@ exports.googleRegister = async (req, res) => {
     const { idToken, deviceId } = req.body;
 
     if (!idToken) {
-      return res.status(400).json({ success: false, error: "idToken is required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "idToken is required" });
     }
 
     const payload = await verifyGoogleToken(idToken);
@@ -201,7 +250,9 @@ exports.googleRegister = async (req, res) => {
     // Check device ban
     const normalizedDeviceId = normalizeDeviceId(deviceId);
     if (normalizedDeviceId) {
-      const banned = await BannedDevice.findOne({ deviceId: normalizedDeviceId });
+      const banned = await BannedDevice.findOne({
+        deviceId: normalizedDeviceId,
+      });
       if (banned) {
         if (banned.expiresAt && banned.expiresAt < new Date()) {
           await BannedDevice.deleteOne({ _id: banned._id });
@@ -256,7 +307,9 @@ exports.googleLogin = async (req, res) => {
     const { idToken, deviceId } = req.body;
 
     if (!idToken) {
-      return res.status(400).json({ success: false, error: "idToken is required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "idToken is required" });
     }
 
     const payload = await verifyGoogleToken(idToken);
@@ -279,7 +332,9 @@ exports.googleLogin = async (req, res) => {
 
     // Check device ban
     if (normalizedDeviceId) {
-      const banned = await BannedDevice.findOne({ deviceId: normalizedDeviceId });
+      const banned = await BannedDevice.findOne({
+        deviceId: normalizedDeviceId,
+      });
       if (banned) {
         if (banned.expiresAt && banned.expiresAt < new Date()) {
           await BannedDevice.deleteOne({ _id: banned._id });
@@ -317,7 +372,9 @@ exports.linkGoogle = async (req, res) => {
     const { userId, idToken } = req.body;
 
     if (!userId || !idToken) {
-      return res.status(400).json({ success: false, error: "userId and idToken are required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "userId and idToken are required" });
     }
 
     const payload = await verifyGoogleToken(idToken);

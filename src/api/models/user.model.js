@@ -8,10 +8,15 @@ const userSchema = new mongoose.Schema({
   profilePicture: { type: String, default: null },
   deviceId: { type: String, default: null },
   frame: { type: String, default: null }, // Avatar frame ID (e.g. "wreath", "wings1")
+  coins: { type: Number, default: 0 },
+  ownedFrames: [{ type: String }],
   expoPushToken: { type: String, default: null },
   notificationPreferences: {
     publicRooms: { type: Boolean, default: true },
+    friendRequests: { type: Boolean, default: true },
+    friendActivity: { type: Boolean, default: true },
   },
+  friendCount: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now },
   stats: {
     gamesPlayed: { type: Number, default: 0 },
@@ -28,5 +33,6 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ "stats.gamesWon": -1, "stats.gamesPlayed": 1 });
 userSchema.index({ deviceId: 1 });
 userSchema.index({ googleId: 1 }, { sparse: true });
+userSchema.index({ name: "text" });
 
 module.exports = mongoose.model("User", userSchema);
