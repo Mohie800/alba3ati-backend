@@ -343,16 +343,8 @@ async function getFriends(userId, page = 1, limit = 20) {
   const [friendships, total] = await Promise.all([
     Friendship.find(filter)
       .populate([
-        {
-          path: "requester",
-          select: "name frame stats",
-          match: { _id: { $ne: userId } },
-        },
-        {
-          path: "recipient",
-          select: "name frame stats",
-          match: { _id: { $ne: userId } },
-        },
+        { path: "requester", select: "name frame stats" },
+        { path: "recipient", select: "name frame stats" },
       ])
       .skip(skip)
       .limit(limit)
