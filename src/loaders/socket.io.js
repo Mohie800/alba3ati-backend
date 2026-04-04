@@ -458,59 +458,59 @@ module.exports = (server) => {
             evaluateCountdown(io, roomId);
           }
 
-          if (
-            updatedRoom.isPublic &&
-            !updatedRoom.isQuickPlay &&
-            updatedRoom.status === "waiting" &&
-            updatedRoom.players.length === 3
-          ) {
-            try {
-              const markedRoom = await Room.findOneAndUpdate(
-                {
-                  _id: updatedRoom._id,
-                  publicRoomReadyNotifiedAt: null,
-                },
-                { $set: { publicRoomReadyNotifiedAt: new Date() } },
-                { new: true },
-              );
+          // if (
+          //   updatedRoom.isPublic &&
+          //   !updatedRoom.isQuickPlay &&
+          //   updatedRoom.status === "waiting" &&
+          //   updatedRoom.players.length === 3
+          // ) {
+          //   try {
+          //     const markedRoom = await Room.findOneAndUpdate(
+          //       {
+          //         _id: updatedRoom._id,
+          //         publicRoomReadyNotifiedAt: null,
+          //       },
+          //       { $set: { publicRoomReadyNotifiedAt: new Date() } },
+          //       { new: true },
+          //     );
 
-              if (markedRoom) {
-                const roomPlayerIds = updatedRoom.players
-                  .map((p) => p.player?._id?.toString())
-                  .filter(Boolean);
+          //     if (markedRoom) {
+          //       const roomPlayerIds = updatedRoom.players
+          //         .map((p) => p.player?._id?.toString())
+          //         .filter(Boolean);
 
-                const recipients = await User.find({
-                  _id: { $nin: roomPlayerIds },
-                  expoPushToken: { $ne: null },
-                  $or: [
-                    {
-                      "notificationPreferences.publicRooms": { $exists: false },
-                    },
-                    { "notificationPreferences.publicRooms": true },
-                  ],
-                }).select("_id");
+          //       const recipients = await User.find({
+          //         _id: { $nin: roomPlayerIds },
+          //         expoPushToken: { $ne: null },
+          //         $or: [
+          //           {
+          //             "notificationPreferences.publicRooms": { $exists: false },
+          //           },
+          //           { "notificationPreferences.publicRooms": true },
+          //         ],
+          //       }).select("_id");
 
-                const recipientIds = recipients.map((u) => u._id.toString());
+          //       const recipientIds = recipients.map((u) => u._id.toString());
 
-                if (recipientIds.length > 0) {
-                  await sendPushNotification({
-                    title: "غرفة عامة جاهزة",
-                    body: "تم الوصول إلى 3 لاعبين. انضم الآن!",
-                    data: {
-                      screen: "room",
-                      roomId: updatedRoom.roomId,
-                      playerCount: 3,
-                      type: "public_room_ready",
-                    },
-                    userIds: recipientIds,
-                    type: "targeted",
-                  });
-                }
-              }
-            } catch (notifErr) {
-              console.error("Public room ready notification error:", notifErr);
-            }
-          }
+          //       if (recipientIds.length > 0) {
+          //         await sendPushNotification({
+          //           title: "غرفة عامة جاهزة",
+          //           body: "تم الوصول إلى 3 لاعبين. انضم الآن!",
+          //           data: {
+          //             screen: "room",
+          //             roomId: updatedRoom.roomId,
+          //             playerCount: 3,
+          //             type: "public_room_ready",
+          //           },
+          //           userIds: recipientIds,
+          //           type: "targeted",
+          //         });
+          //       }
+          //     }
+          //   } catch (notifErr) {
+          //     console.error("Public room ready notification error:", notifErr);
+          //   }
+          // }
         }
       } catch (error) {
         socket.emit("joinError", { message: "Failed to join room" });
