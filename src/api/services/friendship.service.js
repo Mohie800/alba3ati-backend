@@ -483,15 +483,27 @@ async function searchPlayers(userId, query, page = 1, limit = 15) {
 
   const skip = (page - 1) * limit;
 
-  const users = await User.find(
-    { _id: { $ne: userId }, $text: { $search: query } },
-    { score: { $meta: "textScore" } },
-  )
-    .select("name frame stats")
-    .sort({ score: { $meta: "textScore" } })
-    .skip(skip)
-    .limit(limit)
-    .lean();
+  // Check if query looks like a MongoDB ObjectId (search by player ID)
+  let users;
+  if (/^[a-fA-F0-9]{24}$/.test(query.trim())) {
+    const mongoose = require("mongoose");
+    const targetId = query.trim();
+    if (targetId === userId) return [];
+    const user = await User.findById(targetId)
+      .select("name frame stats")
+      .lean();
+    users = user ? [user] : [];
+  } else {
+    users = await User.find(
+      { _id: { $ne: userId }, $text: { $search: query } },
+      { score: { $meta: "textScore" } },
+    )
+      .select("name frame stats")
+      .sort({ score: { $meta: "textScore" } })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+  }
 
   if (users.length === 0) return [];
 
