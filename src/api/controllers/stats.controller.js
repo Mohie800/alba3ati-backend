@@ -3,6 +3,7 @@ const Room = require("../models/room.model");
 const Contact = require("../models/contact.model");
 const BannedDevice = require("../models/bannedDevice.model");
 const Report = require("../models/report.model");
+const presenceService = require("../services/presence.service");
 
 exports.getDashboardStats = async (req, res) => {
   try {
@@ -36,7 +37,8 @@ exports.getDashboardStats = async (req, res) => {
       activeConnectionsResult.length > 0 ? activeConnectionsResult[0].total : 0;
 
     const io = req.app.get("io");
-    const onlinePlayers = io ? io.engine.clientsCount : 0;
+    const onlinePlayers = presenceService.getOnlineCount();
+    const activeSocketConnections = io ? io.engine.clientsCount : 0;
 
     res.json({
       success: true,
@@ -48,6 +50,7 @@ exports.getDashboardStats = async (req, res) => {
         activeRooms,
         activeConnections,
         onlinePlayers,
+        activeSocketConnections,
         newContacts,
         pendingReports,
       },

@@ -184,6 +184,57 @@ module.exports = (server) => {
     5 * 60 * 1000,
   );
 
+  // --- Presence helpers (shared across all connections) ---
+
+  /**
+   * Register a socket for a player. Cancels any pending offline debounce.
+   * Does NOT set presence state — callers decide (setOnline vs setPlaying).
+   */
+  function registerUserSocket(socket, playerId) {
+    const id = playerId?.toString();
+    if (!id) return;
+    if (!userSockets.has(id)) userSockets.set(id, new Set());
+    userSockets.get(id).add(socket.id);
+    presenceService.cancelPendingOffline(id);
+  }
+
+  /**
+   * Unregister a socket. When no sockets remain, schedules debounced offline.
+   */
+  function unregisterUserSocket(socket, playerId) {
+    const id = playerId?.toString();
+    if (!id) return;
+    const sockets = userSockets.get(id);
+    if (!sockets) return;
+    sockets.delete(socket.id);
+    if (sockets.size === 0) {
+      userSockets.delete(id);
+      presenceService.scheduleOffline(id, (uid) => {
+        notifyFriendsPresence(uid, "offline");
+      });
+    }
+  }
+
+  /**
+   * Broadcast presence update to a player's online friends.
+   */
+  async function notifyFriendsPresence(userId, status, roomId) {
+    try {
+      const id = userId.toString();
+      const friendIds = await friendshipService.getFriendIds(id);
+      for (const friendId of friendIds) {
+        if (presenceService.isOnline(friendId)) {
+          emitToUser(friendId, "friendPresenceUpdate", {
+            userId: id,
+            presence: { status, roomId },
+          });
+        }
+      }
+    } catch (err) {
+      console.error("[Presence] notify friends error:", err.message);
+    }
+  }
+
   // Connection handler
   io.on("connection", (socket) => {
     console.log("New client connected");
@@ -193,36 +244,18 @@ module.exports = (server) => {
     socket.gameRoomId = null;
     socket.playerId = null;
 
-    // Register socket for presence tracking once playerId is known
-    // (playerId is set on joinRoom/createRoom/quickPlay — we handle presence there)
-    function registerUserSocket(playerId) {
-      if (!playerId) return;
-      if (!userSockets.has(playerId)) userSockets.set(playerId, new Set());
-      const wasOffline = userSockets.get(playerId).size === 0;
-      userSockets.get(playerId).add(socket.id);
-
-      if (wasOffline) {
-        presenceService.setOnline(playerId);
-        // Notify friends of online status
-        notifyFriendsPresence(playerId, "online");
+    // --- Per-socket presence queries (any player can check any profile) ---
+    socket.on("getPlayerPresence", (userId, callback) => {
+      if (typeof callback === "function" && userId) {
+        callback(presenceService.getPresence(userId));
       }
-    }
+    });
 
-    async function notifyFriendsPresence(userId, status, roomId) {
-      try {
-        const friendIds = await friendshipService.getFriendIds(userId);
-        for (const friendId of friendIds) {
-          if (presenceService.isOnline(friendId)) {
-            emitToUser(friendId, "friendPresenceUpdate", {
-              userId,
-              presence: { status, roomId },
-            });
-          }
-        }
-      } catch (err) {
-        // Non-critical — don't crash on presence broadcast errors
+    socket.on("getMultiplePresence", (userIds, callback) => {
+      if (typeof callback === "function" && Array.isArray(userIds)) {
+        callback(presenceService.getMultiplePresence(userIds.slice(0, 50)));
       }
-    }
+    });
 
     // Handle room creation
     socket.on("createRoom", async (host) => {
@@ -252,8 +285,8 @@ module.exports = (server) => {
         socket.gameRoomId = roomId;
         socket.playerId = host;
 
-        // Presence: register socket and broadcast to friends
-        registerUserSocket(host);
+        // Presence: register socket and set playing
+        registerUserSocket(socket, host);
         presenceService.setPlaying(host, roomId);
         notifyFriendsPresence(host, "playing", roomId);
 
@@ -344,7 +377,7 @@ module.exports = (server) => {
           socket.playerId = player;
 
           // Presence: register socket on reconnect
-          registerUserSocket(player);
+          registerUserSocket(socket, player);
           presenceService.setPlaying(player, roomId);
           notifyFriendsPresence(player, "playing", roomId);
 
@@ -406,7 +439,7 @@ module.exports = (server) => {
           socket.playerId = player;
 
           // Presence: set playing and notify friends
-          registerUserSocket(player);
+          registerUserSocket(socket, player);
           presenceService.setPlaying(player, roomId);
           notifyFriendsPresence(player, "playing", roomId);
           notifyFriendsJoinedRoom(
@@ -495,7 +528,8 @@ module.exports = (server) => {
           return;
         }
         // Register presence before entering quick play
-        registerUserSocket(playerId);
+        registerUserSocket(socket, playerId);
+        presenceService.setOnline(playerId);
         await findOrCreateQuickPlayRoom(io, socket, playerId);
       } catch (error) {
         console.error("[QuickPlay] Error:", error);
@@ -545,21 +579,13 @@ module.exports = (server) => {
       if (socket.gameRoomId) {
         leaveRoom(io, socket, socket.gameRoomId, playerId, false);
         socket.gameRoomId = null;
-        socket.playerId = null;
       }
 
-      // Clean up userSockets map
+      // Debounced presence cleanup (waits before marking offline)
       if (playerId) {
-        const sockets = userSockets.get(playerId);
-        if (sockets) {
-          sockets.delete(socket.id);
-          if (sockets.size === 0) {
-            userSockets.delete(playerId);
-            presenceService.setOffline(playerId);
-            notifyFriendsPresence(playerId, "offline");
-          }
-        }
+        unregisterUserSocket(socket, playerId);
       }
+      socket.playerId = null;
     });
 
     socket.on("home", () => {
@@ -567,11 +593,11 @@ module.exports = (server) => {
       if (socket.gameRoomId) {
         leaveRoom(io, socket, socket.gameRoomId, playerId, true);
         socket.gameRoomId = null;
-        socket.playerId = null;
+        // Don't null playerId — socket is still connected, need it for disconnect cleanup
       }
 
       // Player left room but is still connected — set back to online
-      if (playerId && userSockets.has(playerId)) {
+      if (playerId) {
         presenceService.setOnline(playerId);
         notifyFriendsPresence(playerId, "online");
       }

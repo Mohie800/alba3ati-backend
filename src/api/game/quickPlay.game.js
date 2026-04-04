@@ -15,6 +15,7 @@ const {
   isPlayerInWaitingGracePeriod,
   cancelWaitingGracePeriod,
 } = require("./disconnect.game");
+const presenceService = require("../services/presence.service");
 
 // In-memory state
 let activeQuickPlayRoomId = null;
@@ -74,6 +75,7 @@ const findOrCreateQuickPlayRoom = async (io, socket, playerId) => {
           joinRoom(io, socket, room.roomId);
           socket.gameRoomId = room.roomId;
           socket.playerId = playerId;
+          presenceService.setPlaying(playerId, room.roomId);
           socket.emit("roomJoined", room);
           io.to(room.roomId).emit("playerJoined", room);
           return;
@@ -102,6 +104,7 @@ const findOrCreateQuickPlayRoom = async (io, socket, playerId) => {
       joinRoom(io, socket, roomId);
       socket.gameRoomId = roomId;
       socket.playerId = playerId;
+      presenceService.setPlaying(playerId, roomId);
       socket.emit("roomJoined", room);
       io.to(roomId).emit("playerJoined", room);
       evaluateCountdown(io, roomId);
@@ -118,6 +121,7 @@ const findOrCreateQuickPlayRoom = async (io, socket, playerId) => {
     joinRoom(io, socket, room.roomId);
     socket.gameRoomId = room.roomId;
     socket.playerId = playerId;
+    presenceService.setPlaying(playerId, room.roomId);
     socket.emit("roomJoined", room);
     io.to(room.roomId).emit("playerJoined", room);
     evaluateCountdown(io, room.roomId);
