@@ -18,10 +18,11 @@ const {
   searchPlayers,
 } = require("../services/friendship.service");
 
-// Rate limit: max 20 friend requests per hour per IP
+// Rate limit: max 20 friend requests per hour per user
 const requestLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 20,
+  max: 50,
+  keyGenerator: (req) => req.body?.userId || req.ip,
   message: { error: "تجاوزت الحد المسموح به من طلبات الصداقة. حاول لاحقاً." },
   standardHeaders: true,
   legacyHeaders: false,
