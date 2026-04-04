@@ -7,7 +7,10 @@ exports.startGame = async (io, socket, { roomId }) => {
   try {
     const room = await Room.findOne({ roomId });
     if (!room) return;
-    if (room.players.length <= 4) {
+    if (
+      room.players.length <= 4 &&
+      room.host.toString() !== "69c9ab1a6631e3885a13ed49"
+    ) {
       socket.emit("startGameError", { message: "عدد اللاعبين غير كافي" });
       return;
     }
