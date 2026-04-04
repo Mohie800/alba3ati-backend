@@ -22,11 +22,13 @@ Alba3ati is a real-time multiplayer game server for a Sudanese Mafia/Werewolf va
 **Entry point:** `src/app.js` — Creates HTTP server, initializes loaders, mounts routes.
 
 **Loader pattern:** `src/loaders/` modules initialize subsystems independently:
+
 - `express.js` — Helmet, CORS, body parsing
 - `mongoose.js` — MongoDB connection
 - `socket.io.js` — All real-time event handlers (this is the largest file and core of the game)
 
 **Layered structure:**
+
 - `src/api/controllers/` — HTTP request handlers (auth, room listing)
 - `src/api/models/` — Mongoose schemas (User, Room, GameRound)
 - `src/api/routes/` — Express route definitions mounted at `/api`
@@ -60,13 +62,13 @@ Most game interaction happens through Socket.IO events, not REST endpoints. The 
 
 ## Game Roles (from constants.js)
 
-| ID | Arabic Name | Role |
-|----|------------|------|
-| 1 | البعاتي | Killer (Ba3ati) |
-| 2 | العمدة | Protector (Al3omda) |
-| 3 | شيخ الدمازين | Damazeen Chief |
-| 4 | ست الودع | Special role |
-| 5 | ابو جنزير | Special role |
+| ID  | Arabic Name  | Role                |
+| --- | ------------ | ------------------- |
+| 1   | البعاتي      | Killer (Ba3ati)     |
+| 2   | العمدة       | Protector (Al3omda) |
+| 3   | شيخ الدمازين | Damazeen Chief      |
+| 4   | الكاشف       | Special role        |
+| 5   | ابو جنزير    | Special role        |
 
 ## Socket.IO Event Map
 

@@ -2,7 +2,7 @@ exports.ROLES = [
   { id: "1", name: "البعاتي", color: "#4A90E2" },
   { id: "2", name: "العمدة", color: "#50E3C2" },
   { id: "3", name: "شيخ الدمازين", color: "#E94F37" },
-  { id: "4", name: "ست الودع", color: "#8E44AD" },
+  { id: "4", name: "الكاشف", color: "#8E44AD" },
   { id: "5", name: "ابو جنزير", color: "#F1C40F" },
   { id: "6", name: "بله اب سيف", color: "#D35400" },
   { id: "7", name: "بعاتي كبير", color: "#1A5276" },

@@ -329,8 +329,8 @@ app/
 │  │  [-]  1  [+]           │  │
 │  └────────────────────────┘  │
 │  ┌────────────────────────┐  │
-│  │ [IMG: ست الودع]        │  │
-│  │  ست الودع              │  │
+│  │ [IMG: الكاشف]        │  │
+│  │  الكاشف              │  │
 │  │  [-]  1  [+]           │  │
 │  └────────────────────────┘  │
 │  ┌────────────────────────┐  │
@@ -432,7 +432,7 @@ app/
 - `[IMG: البعاتي card — large character illustration, role color #4A90E2]`
 - `[IMG: العمدة card — large character illustration, role color #50E3C2]`
 - `[IMG: شيخ الدمازين card — large character illustration, role color #E94F37]`
-- `[IMG: ست الودع card — large character illustration, role color #8E44AD]`
+- `[IMG: الكاشف card — large character illustration, role color #8E44AD]`
 - `[IMG: ابو جنزير card — large character illustration, role color #F1C40F]`
 
 ---
@@ -506,7 +506,7 @@ app/
 - **Animation (Attack):** Selected target gets a flame animation
 - **Animation (Protect):** Dome shield animation over all players
 
-#### ست الودع (Sit Al-Wada3) — Role ID: "4"
+#### الكاشف (Sit Al-Wada3) — Role ID: "4"
 
 - **Instruction:** "أنت في أمان الليلة. انتظر الصباح" (You are safe tonight. Wait for morning.)
 - **Action:** No night action — passive role. Show waiting state
@@ -519,7 +519,7 @@ app/
 - **Instruction:** "أنت في أمان الليلة. انتظر الصباح" (You are safe tonight. Wait for morning.)
 - **Action:** No night action — passive role. Show waiting state
 - **UI:** Display animated sleeping character illustration
-- Same behavior as ست الودع
+- Same behavior as الكاشف
 
 **Common Night Phase Behavior:**
 
@@ -785,7 +785,7 @@ app/
 │  │ أحمد — البعاتي    💀  │  │
 │  │ سارة — العمدة     🏆  │  │
 │  │ محمد — شيخ الدمازين 💀 │  │
-│  │ علي — ست الودع    🏆  │  │
+│  │ علي — الكاشف    🏆  │  │
 │  │ خالد — ابو جنزير  🏆  │  │
 │  └────────────────────────┘  │
 │                              │
@@ -926,7 +926,7 @@ app/
 
 ---
 
-### 6.4 ست الودع (Sit Al-Wada3) — The Seer
+### 6.4 الكاشف (Sit Al-Wada3) — The Seer
 
 | Property      | Value                 |
 | ------------- | --------------------- |
@@ -938,7 +938,7 @@ app/
 | Win Condition | All Ba3ati eliminated |
 
 **Description shown to player:**
-"أنتِ ست الودع. ليس لديكِ قدرة ليلية، لكن حدسكِ وذكاءكِ في النقاش هما سلاحكِ. ساعدي القرية في كشف البعاتي!"
+"أنتِ الكاشف. ليس لديكِ قدرة ليلية، لكن حدسكِ وذكاءكِ في النقاش هما سلاحكِ. ساعدي القرية في كشف البعاتي!"
 
 **Character illustration:**
 `[IMG: Wise cartoon woman in traditional Sudanese dress (ثوب سوداني) with cowrie shells (ودع) as jewelry/headpiece. Mysterious smile, purple aura, holding a decorative bowl of cowrie shells. Elegant and mystical.]`
@@ -964,7 +964,7 @@ app/
 **Character illustration:**
 `[IMG: Tough cartoon character with a large chain (جنزير) wrapped around arm/shoulder, muscular build, gold/yellow vest, confident stance. Traditional Sudanese scarification marks on face. Intimidating but heroic.]`
 
-**Night behavior:** Same as ست الودع — passive, waiting/sleeping screen during night.
+**Night behavior:** Same as الكاشف — passive, waiting/sleeping screen during night.
 
 ---
 
@@ -997,7 +997,7 @@ app/
    │   ├─ العمدة → al3omdaAction                   │
    │   ├─ شيخ الدمازين → damazeenAction            │
    │   │              OR damazeenProtection         │
-   │   └─ ست الودع / ابو جنزير → wait (passive)    │
+   │   └─ الكاشف / ابو جنزير → wait (passive)    │
    │                                              │
    ├─ Each action → playerDone event              │
    ├─ All done OR timer expires                   │
@@ -1227,12 +1227,12 @@ All assets should be cartoonish vector illustrations (SVG preferred, PNG fallbac
 | `role-ba3ati`            | البعاتي full character (see 6.1)                                               | Role cards, reveal       |
 | `role-al3omda`           | العمدة full character (see 6.2)                                                | Role cards, reveal       |
 | `role-damazeen`          | شيخ الدمازين full character (see 6.3)                                          | Role cards, reveal       |
-| `role-sit-alwada3`       | ست الودع full character (see 6.4)                                              | Role cards, reveal       |
+| `role-sit-alwada3`       | الكاشف full character (see 6.4)                                                | Role cards, reveal       |
 | `role-abu-janzeer`       | ابو جنزير full character (see 6.5)                                             | Role cards, reveal       |
 | `role-ba3ati-thumb`      | البعاتي thumbnail (80x80)                                                      | Role setup, game over    |
 | `role-al3omda-thumb`     | العمدة thumbnail (80x80)                                                       | Role setup, game over    |
 | `role-damazeen-thumb`    | شيخ الدمازين thumbnail (80x80)                                                 | Role setup, game over    |
-| `role-sit-alwada3-thumb` | ست الودع thumbnail (80x80)                                                     | Role setup, game over    |
+| `role-sit-alwada3-thumb` | الكاشف thumbnail (80x80)                                                       | Role setup, game over    |
 | `role-abu-janzeer-thumb` | ابو جنزير thumbnail (80x80)                                                    | Role setup, game over    |
 | `avatar-default`         | Generic player avatar placeholder (circle)                                     | All player grids         |
 | `avatar-dead`            | Ghost version of avatar (X eyes, translucent)                                  | Dead player display      |
