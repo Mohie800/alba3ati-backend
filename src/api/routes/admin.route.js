@@ -22,6 +22,7 @@ router.get("/profile", adminAuth, adminController.getProfile);
 router.get("/stats", adminAuth, statsController.getDashboardStats);
 router.get("/players", adminAuth, statsController.getPlayers);
 router.get("/players/:id", adminAuth, statsController.getPlayerDetail);
+router.delete("/players/:id", adminAuth, statsController.deletePlayer);
 router.patch(
   "/players/:id/frame",
   adminAuth,
@@ -77,6 +78,7 @@ router.delete("/ads/:id", adminAuth, adController.deleteAd);
 
 // Daily Stats / Analytics
 router.get("/daily-stats", adminAuth, dailyStatsController.getDailyStats);
+router.get("/coin-stats", adminAuth, statsController.getCoinStats);
 
 // Friendships (admin)
 router.get(
@@ -103,6 +105,10 @@ router.delete("/shop-items/:id", adminAuth, shopAdminController.deleteShopItem);
 
 // Player Coins (admin)
 router.get("/players/:id/coins", adminAuth, shopAdminController.getPlayerCoins);
-router.post("/players/:id/adjust-coins", adminAuth, shopAdminController.adjustPlayerCoins);
+router.post(
+  "/players/:id/adjust-coins",
+  adminAuth,
+  shopAdminController.adjustPlayerCoins,
+);
 
 module.exports = router;

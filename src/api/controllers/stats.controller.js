@@ -65,9 +65,17 @@ exports.getPlayers = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const search = req.query.search || "";
+    const searchBy = req.query.searchBy || "name";
     const skip = (page - 1) * limit;
 
-    const query = search ? { name: { $regex: search, $options: "i" } } : {};
+    let query = {};
+    if (search) {
+      if (searchBy === "deviceId") {
+        query = { deviceId: { $regex: search, $options: "i" } };
+      } else {
+        query = { name: { $regex: search, $options: "i" } };
+      }
+    }
 
     const [players, total] = await Promise.all([
       User.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),
@@ -165,6 +173,8 @@ exports.getGameDetail = async (req, res) => {
   }
 };
 
+const Friendship = require("../models/friendship.model");
+const CoinTransaction = require("../models/coinTransaction.model");
 const ShopItem = require("../models/shopItem.model");
 
 exports.updatePlayerFrame = async (req, res) => {
@@ -206,6 +216,92 @@ exports.updatePlayerFrame = async (req, res) => {
         .json({ success: false, message: "Player not found" });
     }
     res.json({ success: true, data: { frame: player.frame } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.deletePlayer = async (req, res) => {
+  try {
+    const player = await User.findById(req.params.id);
+    if (!player) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Player not found" });
+    }
+
+    await Promise.all([
+      User.findByIdAndDelete(req.params.id),
+      Friendship.deleteMany({
+        $or: [{ requester: req.params.id }, { recipient: req.params.id }],
+      }),
+      CoinTransaction.deleteMany({ user: req.params.id }),
+    ]);
+
+    res.json({ success: true, message: "Player deleted" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.getCoinStats = async (req, res) => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const [totalCoins, breakdownByType, todayBreakdown, recentTransactions] =
+      await Promise.all([
+        User.aggregate([
+          { $group: { _id: null, total: { $sum: "$coins" } } },
+        ]),
+        CoinTransaction.aggregate([
+          {
+            $group: {
+              _id: "$type",
+              totalAmount: { $sum: "$amount" },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { count: -1 } },
+        ]),
+        CoinTransaction.aggregate([
+          { $match: { createdAt: { $gte: today } } },
+          {
+            $group: {
+              _id: "$type",
+              totalAmount: { $sum: "$amount" },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { count: -1 } },
+        ]),
+        CoinTransaction.find()
+          .sort({ createdAt: -1 })
+          .limit(20)
+          .populate("user", "name"),
+      ]);
+
+    const totalCoinsInCirculation =
+      totalCoins.length > 0 ? totalCoins[0].total : 0;
+
+    const totalEarned = breakdownByType
+      .filter((b) => b.totalAmount > 0)
+      .reduce((sum, b) => sum + b.totalAmount, 0);
+    const totalSpent = breakdownByType
+      .filter((b) => b.totalAmount < 0)
+      .reduce((sum, b) => sum + Math.abs(b.totalAmount), 0);
+
+    res.json({
+      success: true,
+      data: {
+        totalCoinsInCirculation,
+        totalEarned,
+        totalSpent,
+        breakdownByType,
+        todayBreakdown,
+        recentTransactions,
+      },
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
   }

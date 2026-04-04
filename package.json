@@ -8,7 +8,8 @@
     "dev": "nodemon src/app.js",
     "seed:admin": "node src/scripts/seedAdmin.js",
     "flush:rooms": "node src/scripts/flushStaleRooms.js",
-    "flush:incomplete": "node src/scripts/flushIncompleteGames.js"
+    "flush:incomplete": "node src/scripts/flushIncompleteGames.js",
+    "zero:coins": "node src/scripts/zeroAllCoins.js"
   },
   "keywords": [],
   "author": "",
