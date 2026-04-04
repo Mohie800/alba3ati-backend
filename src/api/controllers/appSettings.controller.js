@@ -50,28 +50,50 @@ exports.getSettings = async (req, res) => {
 // Admin: update settings
 exports.updateSettings = async (req, res) => {
   try {
-    const { forceUpdate, minVersion, updateMessage, playStoreUrl, appStoreUrl, maintenanceMode, maintenanceMessage, coinRewards, communityLinks } = req.body;
+    const {
+      forceUpdate,
+      minVersion,
+      updateMessage,
+      playStoreUrl,
+      appStoreUrl,
+      maintenanceMode,
+      maintenanceMessage,
+      coinRewards,
+      communityLinks,
+    } = req.body;
     const settings = await AppSettings.getSettings();
 
     if (typeof forceUpdate === "boolean") settings.forceUpdate = forceUpdate;
     if (minVersion) settings.minVersion = minVersion;
-    if (typeof updateMessage === "string") settings.updateMessage = updateMessage;
+    if (typeof updateMessage === "string")
+      settings.updateMessage = updateMessage;
     if (typeof playStoreUrl === "string") settings.playStoreUrl = playStoreUrl;
     if (typeof appStoreUrl === "string") settings.appStoreUrl = appStoreUrl;
-    if (typeof maintenanceMode === "boolean") settings.maintenanceMode = maintenanceMode;
-    if (typeof maintenanceMessage === "string") settings.maintenanceMessage = maintenanceMessage;
+    if (typeof maintenanceMode === "boolean")
+      settings.maintenanceMode = maintenanceMode;
+    if (typeof maintenanceMessage === "string")
+      settings.maintenanceMessage = maintenanceMessage;
     if (coinRewards && typeof coinRewards === "object") {
-      if (typeof coinRewards.gameComplete === "number") settings.coinRewards.gameComplete = coinRewards.gameComplete;
-      if (typeof coinRewards.gameWin === "number") settings.coinRewards.gameWin = coinRewards.gameWin;
-      if (typeof coinRewards.adReward === "number") settings.coinRewards.adReward = coinRewards.adReward;
-      if (typeof coinRewards.maxAdsPerDay === "number") settings.coinRewards.maxAdsPerDay = coinRewards.maxAdsPerDay;
+      if (typeof coinRewards.gameComplete === "number")
+        settings.coinRewards.gameComplete = coinRewards.gameComplete;
+      if (typeof coinRewards.gameWin === "number")
+        settings.coinRewards.gameWin = coinRewards.gameWin;
+      if (typeof coinRewards.adReward === "number")
+        settings.coinRewards.adReward = coinRewards.adReward;
+      if (typeof coinRewards.maxAdsPerDay === "number")
+        settings.coinRewards.maxAdsPerDay = coinRewards.maxAdsPerDay;
     }
     if (communityLinks && typeof communityLinks === "object") {
-      if (typeof communityLinks.enabled === "boolean") settings.communityLinks.enabled = communityLinks.enabled;
+      if (typeof communityLinks.enabled === "boolean")
+        settings.communityLinks.enabled = communityLinks.enabled;
       for (const platform of ["whatsapp", "telegram", "discord"]) {
         if (communityLinks[platform]) {
-          if (typeof communityLinks[platform].url === "string") settings.communityLinks[platform].url = communityLinks[platform].url;
-          if (typeof communityLinks[platform].enabled === "boolean") settings.communityLinks[platform].enabled = communityLinks[platform].enabled;
+          if (typeof communityLinks[platform].url === "string")
+            settings.communityLinks[platform].url =
+              communityLinks[platform].url;
+          if (typeof communityLinks[platform].enabled === "boolean")
+            settings.communityLinks[platform].enabled =
+              communityLinks[platform].enabled;
         }
       }
     }
