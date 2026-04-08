@@ -20,7 +20,14 @@ async function getExpo() {
  * @param {string} [params.type] - "broadcast" | "targeted" | "contact_response"
  * @param {string} [params.sentBy] - Admin ID
  */
-async function sendPushNotification({ title, body, data = {}, userIds, type = "broadcast", sentBy = null }) {
+async function sendPushNotification({
+  title,
+  body,
+  data = {},
+  userIds,
+  type = "broadcast",
+  sentBy = null,
+}) {
   const { Expo, expo } = await getExpo();
 
   // Build query for users with valid push tokens
@@ -93,7 +100,7 @@ async function sendFriendRequestNotification(fromName, toUserId) {
 async function sendFriendRoomNotification(friendName, roomId, toUserIds) {
   return sendPushNotification({
     title: "صديقك يلعب!",
-    body: `${friendName} ينتظر في غرفة — تعال العب معه!`,
+    body: `${friendName} ينتظر في غرفة`,
     data: { type: "friend_room", roomId },
     userIds: toUserIds,
     type: "targeted",

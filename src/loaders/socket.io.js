@@ -130,7 +130,7 @@ module.exports = (server) => {
       if (offlineFriendIds.length > 0) {
         sendPushNotification({
           title: "صديقك يلعب!",
-          body: `${name} ينتظر في غرفة — تعال العب معه!`,
+          body: `${name} ينتظر في غرفة`,
           data: { type: "friend_room", roomId },
           userIds: offlineFriendIds,
           type: "targeted",
