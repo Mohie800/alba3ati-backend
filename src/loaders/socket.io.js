@@ -588,15 +588,34 @@ module.exports = (server) => {
       socket.playerId = null;
     });
 
-    socket.on("home", () => {
+    socket.on("home", async () => {
       const playerId = socket.playerId;
-      if (socket.gameRoomId) {
-        leaveRoom(io, socket, socket.gameRoomId, playerId, true);
+      let roomId = socket.gameRoomId;
+
+      // If socket state is out of sync, fall back to DB to find any active room
+      // the player is still part of. This covers race conditions where the socket
+      // lost its gameRoomId but the backend still has the player in a room.
+      if (!roomId && playerId) {
+        try {
+          const staleRoom = await Room.findOne({
+            status: { $in: ["waiting", "playing"] },
+            "players.player": playerId,
+          });
+          if (staleRoom) {
+            roomId = staleRoom.roomId;
+          }
+        } catch (err) {
+          console.error("[home] DB fallback lookup failed:", err);
+        }
+      }
+
+      if (roomId) {
+        leaveRoom(io, socket, roomId, playerId, true);
         socket.gameRoomId = null;
         // Don't null playerId — socket is still connected, need it for disconnect cleanup
       }
 
-      // Player left room but is still connected — set back to online
+      // Player is back at home — mark online regardless of room state
       if (playerId) {
         presenceService.setOnline(playerId);
         notifyFriendsPresence(playerId, "online");

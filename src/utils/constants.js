@@ -9,7 +9,7 @@ exports.ROLES = [
   { id: "8", name: "جنابو", color: "#2E86C1" },
 ];
 
-exports.ROUND_TIME = 150;
+exports.ROUND_TIME = 70;
 exports.DIS_DUE = 10;
 exports.VOTE_TIME = 30;
 exports.GRACE_PERIOD = 60;

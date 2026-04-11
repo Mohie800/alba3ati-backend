@@ -1,8 +1,11 @@
 const Room = require("../models/room.model");
 const {
   startGracePeriod,
+  cancelGracePeriod,
+  handleGracePeriodExpiry,
   clearAllGracePeriodsForRoom,
   startWaitingGracePeriod,
+  cancelWaitingGracePeriod,
 } = require("../game/disconnect.game");
 const { cancelTimer } = require("../game/timer.game");
 const {
@@ -118,8 +121,17 @@ const leaveRoom = async (io, socket, roomId, playerId, intentional = false) => {
       }
       // Non-host (or quick play host) intentional leave during gameOver/rematch:
       // no grace period needed — they'll be excluded from rematch since they won't be connected
+    } else if (intentional) {
+      // Intentional mid-game leave (player went home): cancel any pending grace period
+      // and immediately execute the death/removal logic — do NOT give a reconnect window.
+      cancelGracePeriod(io, roomId, playerId);
+      // Persist the updated activePlayers count first, then trigger immediate death.
+      room.activePlayers = count;
+      await room.save();
+      await handleGracePeriodExpiry(io, roomId, playerId);
+      return;
     } else {
-      // Mid-game: start grace period instead of removing player
+      // Unintentional disconnect: give the player a window to reconnect.
       const graceDuration = room.isQuickPlay ? QUICK_PLAY_GRACE_PERIOD : undefined;
       startGracePeriod(io, roomId, playerId, graceDuration);
     }
