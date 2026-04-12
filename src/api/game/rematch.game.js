@@ -250,6 +250,8 @@ const resetRoomForRematch = (room) => {
   room.ba3atiKabeerConvertTargets = [];
   room.ba3atiKabeerConvertUsedBy = [];
   room.jenabuTargets = [];
+  room.wadAlzalatTargets = [];
+  room.wadAlzalatUsedBy = [];
   room.lastAl3omdaTargets = new Map();
 };
 

@@ -62,6 +62,8 @@ const RoomSchema = new mongoose.Schema(
         target2: { type: String },
       },
     ],
+    wadAlzalatTargets: [{ player: { type: String }, target: { type: String } }],
+    wadAlzalatUsedBy: [{ type: String }],
     rematchAccepted: [{ type: String }],
   },
   { timestamps: true },

@@ -461,3 +461,47 @@ exports.jenabuAction = async (
     return;
   }
 };
+exports.wadAlzalatAction = async (
+  io,
+  socket,
+  { roomId, targetId, playerId },
+) => {
+  try {
+    const room = await Room.findOne({ roomId }).populate("players.player");
+    if (!room) return;
+
+    // Wad Alzalat can only use water once per match
+    if (room.wadAlzalatUsedBy.includes(playerId)) {
+      socket.emit("actionError", {
+        message: "لقد استخدمت جردل الماء بالفعل",
+      });
+      return;
+    }
+
+    // Validate target is alive and in the room
+    const targetPlayer = room.players.find(
+      (p) => p.player._id.toString() === targetId,
+    );
+    if (!targetPlayer || targetPlayer.status !== "alive") return;
+
+    // Atomically update player status and push targets
+    const updated = await Room.findOneAndUpdate(
+      playerElemMatch(roomId, playerId),
+      {
+        $set: { "players.$.playStatus": "done", "players.$.target": targetId },
+        $push: {
+          wadAlzalatTargets: { player: playerId, target: targetId },
+          wadAlzalatUsedBy: playerId,
+        },
+      },
+      { new: true },
+    );
+    if (!updated) return;
+
+    await resoveAction(roomId, io, socket);
+    return;
+  } catch (error) {
+    console.log(error);
+    return;
+  }
+};

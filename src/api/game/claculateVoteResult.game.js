@@ -19,6 +19,7 @@ const resetPlayingStatus = async (roomId) => {
     room.ba3atiKabeerTargets = [];
     room.ba3atiKabeerConvertTargets = [];
     room.jenabuTargets = [];
+    room.wadAlzalatTargets = [];
     room.damazeenProtection = false;
     await room.save();
     clearSkipVotes(roomId);

@@ -44,6 +44,8 @@ function calculateRandomDistribution(totalPlayers, includedRoles) {
     "5": 0, // abu janzeer
     "6": 0, // ballah abu seif
     "7": 0, // ba3ati kabeer
+    "8": 0, // jenabu
+    "9": 0, // wad alzalat
   };
 
   if (totalPlayers < 2) return dist;
@@ -77,6 +79,12 @@ function calculateRandomDistribution(totalPlayers, includedRoles) {
   // Ballah Abu Seif: exactly 1 if included (cap at 1 in random mode)
   if (includedRoles.ballah && remaining > 1) {
     dist["6"] = 1;
+    remaining -= 1;
+  }
+
+  // Wad Alzalat: max 1 in random mode
+  if (includedRoles.wadAlzalat && remaining > 1) {
+    dist["9"] = 1;
     remaining -= 1;
   }
 

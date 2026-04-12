@@ -99,7 +99,40 @@ module.exports.claculateResult = async (io, roomId) => {
       });
     });
 
-    // Snapshot after ballah kills, before abuJanzeer
+    // Wad Alzalat — water splash (unblockable, once per match)
+    const wadAlzalatResults = [];
+    room.wadAlzalatTargets.forEach((entry) => {
+      const target = room.players.find(
+        (p) => p.player._id.toString() === entry.target,
+      );
+      const wadPlayer = room.players.find(
+        (p) => p.player._id.toString() === entry.player,
+      );
+      if (!target || !wadPlayer) return;
+
+      const targetRoleId = target.roleId;
+      const isBa3atiTeam = targetRoleId === "1" || targetRoleId === "7";
+
+      if (isBa3atiTeam) {
+        // Success — target dies
+        target.status = "dead";
+        wadAlzalatResults.push({
+          wadPlayerId: entry.player,
+          wadPlayerName: wadPlayer.player.name,
+          success: true,
+        });
+      } else {
+        // Failure — Wad Alzalat dies
+        wadPlayer.status = "dead";
+        wadAlzalatResults.push({
+          wadPlayerId: entry.player,
+          wadPlayerName: wadPlayer.player.name,
+          success: false,
+        });
+      }
+    });
+
+    // Snapshot after ballah/wadAlzalat kills, before abuJanzeer
     const beforeAbuJanzeer = {};
     room.players.forEach((p) => {
       beforeAbuJanzeer[p.player._id.toString()] = p.status;
@@ -176,6 +209,7 @@ module.exports.claculateResult = async (io, roomId) => {
       abuJanzeerDead,
       ballahKills,
       ba3atiKabeerConverted,
+      wadAlzalatResults,
     });
     cancelTimer(roomId);
     io.to(roomId).emit("stopTimer");
