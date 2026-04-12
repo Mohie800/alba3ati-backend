@@ -5,7 +5,7 @@ const { claculateVoteResult } = require("./claculateVoteResult.game");
 const { startTimer } = require("./timer.game");
 const { clearSkipVotes } = require("./skipDiscussion.game");
 const { clearMutedPlayers } = require("./mutePlayer.game");
-const { clearRoleDeclarations } = require("./declareRole.game");
+const { getRoleDeclarations } = require("./declareRole.game");
 const { updatePlayerStats } = require("./statsUpdate.game");
 const { recordGameEnd } = require("./dailyStats.game");
 
@@ -13,7 +13,6 @@ const { recordGameEnd } = require("./dailyStats.game");
 const startVotingPhase = async (io, roomId) => {
   clearSkipVotes(roomId);
   clearMutedPlayers(roomId);
-  clearRoleDeclarations(roomId);
   const room = await Room.findOne({ roomId });
   if (room) {
     room.gamePhase = "voting";
@@ -95,6 +94,9 @@ module.exports.nightResults = async (io, roomId, voted) => {
       } else {
         room.gamePhase = "discussion";
         await room.save();
+        io.to(roomId).emit("roleDeclarationsSync", {
+          declarations: getRoleDeclarations(roomId),
+        });
         startTimer(
           io,
           room.discussionTime,

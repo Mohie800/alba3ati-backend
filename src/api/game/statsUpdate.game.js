@@ -7,7 +7,8 @@ function didPlayerWin(roleId, gameResult) {
   if (gameResult === "0") return "draw";
   if (roleId === "1" && gameResult === "1") return "win";
   if (roleId === "7" && gameResult === "1") return "win";
-  if (["2", "3", "4", "6"].includes(roleId) && gameResult === "2") return "win";
+  if (["2", "3", "4", "6", "8"].includes(roleId) && gameResult === "2")
+    return "win";
   if (roleId === "5" && gameResult === "3") return "win";
   return "loss";
 }
@@ -27,9 +28,7 @@ async function updatePlayerStats(room, gameResult) {
 
     for (const p of room.players) {
       const playerId =
-        typeof p.player === "object" && p.player._id
-          ? p.player._id
-          : p.player;
+        typeof p.player === "object" && p.player._id ? p.player._id : p.player;
       const outcome = didPlayerWin(p.roleId, gameResult);
 
       const inc = {
@@ -76,9 +75,7 @@ async function updatePlayerStats(room, gameResult) {
     const streakOps = [];
     for (const p of room.players) {
       const playerId = (
-        typeof p.player === "object" && p.player._id
-          ? p.player._id
-          : p.player
+        typeof p.player === "object" && p.player._id ? p.player._id : p.player
       ).toString();
       const outcome = didPlayerWin(p.roleId, gameResult);
       const user = userMap.get(playerId);

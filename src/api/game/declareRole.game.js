@@ -49,3 +49,9 @@ exports.handleDeclareRole = async (
 exports.clearRoleDeclarations = (roomId) => {
   roomDeclarations.delete(roomId);
 };
+
+exports.getRoleDeclarations = (roomId) => {
+  const declarations = roomDeclarations.get(roomId);
+  if (!declarations) return {};
+  return Object.fromEntries(declarations);
+};

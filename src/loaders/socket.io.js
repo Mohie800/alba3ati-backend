@@ -33,6 +33,7 @@ const {
 const {
   handleDeclareRole,
   clearRoleDeclarations,
+  getRoleDeclarations,
 } = require("../api/game/declareRole.game");
 const { getRemainingTime } = require("../api/game/timer.game");
 const {
@@ -120,21 +121,6 @@ module.exports = (server) => {
             isPublic: !!isPublic,
           });
         }
-        // Push notification for offline friends is handled by sendFriendRoomNotification
-      }
-
-      // Send push to offline friends (non-blocking)
-      const offlineFriendIds = friendIds.filter(
-        (id) => !presenceService.isOnline(id),
-      );
-      if (offlineFriendIds.length > 0) {
-        sendPushNotification({
-          title: "صديقك يلعب!",
-          body: `${name} ينتظر في غرفة`,
-          data: { type: "friend_room", roomId },
-          userIds: offlineFriendIds,
-          type: "targeted",
-        }).catch(() => {});
       }
     } catch (err) {
       // Non-critical
@@ -210,7 +196,7 @@ module.exports = (server) => {
     if (sockets.size === 0) {
       userSockets.delete(id);
       presenceService.scheduleOffline(id, (uid) => {
-        notifyFriendsPresence(uid, "offline");
+        notifyFriendsPresence(uid);
       });
     }
   }
@@ -218,15 +204,16 @@ module.exports = (server) => {
   /**
    * Broadcast presence update to a player's online friends.
    */
-  async function notifyFriendsPresence(userId, status, roomId) {
+  async function notifyFriendsPresence(userId) {
     try {
       const id = userId.toString();
       const friendIds = await friendshipService.getFriendIds(id);
+      const presence = presenceService.getPresence(id);
       for (const friendId of friendIds) {
         if (presenceService.isOnline(friendId)) {
           emitToUser(friendId, "friendPresenceUpdate", {
             userId: id,
-            presence: { status, roomId },
+            presence,
           });
         }
       }
@@ -288,7 +275,7 @@ module.exports = (server) => {
         // Presence: register socket and set playing
         registerUserSocket(socket, host);
         presenceService.setPlaying(host, roomId);
-        notifyFriendsPresence(host, "playing", roomId);
+        notifyFriendsPresence(host);
 
         // Notify friends that this player created a room
         notifyFriendsJoinedRoom(
@@ -378,8 +365,8 @@ module.exports = (server) => {
 
           // Presence: register socket on reconnect
           registerUserSocket(socket, player);
-          presenceService.setPlaying(player, roomId);
-          notifyFriendsPresence(player, "playing", roomId);
+          presenceService.setPlaying(player, roomId, room.status);
+          notifyFriendsPresence(player);
 
           if (room.status === "playing") {
             // Mid-game rejoin: send gameReconnected so frontend restores game state
@@ -395,6 +382,7 @@ module.exports = (server) => {
               rematchAccepted: updatedRoom.rematchAccepted || [],
               rematchTimer: getRematchRemainingTime(roomId),
               mutedPlayerIds: getMutedPlayers(roomId),
+              declarations: getRoleDeclarations(roomId),
             });
           } else {
             socket.emit("roomJoined", updatedRoom);
@@ -441,7 +429,7 @@ module.exports = (server) => {
           // Presence: set playing and notify friends
           registerUserSocket(socket, player);
           presenceService.setPlaying(player, roomId);
-          notifyFriendsPresence(player, "playing", roomId);
+          notifyFriendsPresence(player);
           notifyFriendsJoinedRoom(
             player,
             player,
@@ -618,12 +606,30 @@ module.exports = (server) => {
       // Player is back at home — mark online regardless of room state
       if (playerId) {
         presenceService.setOnline(playerId);
-        notifyFriendsPresence(playerId, "online");
+        notifyFriendsPresence(playerId);
       }
     });
 
     //start the game (do not allow players to join)
-    socket.on("startGame", (arg) => startGame(io, socket, arg));
+    socket.on("startGame", async (arg) => {
+      await startGame(io, socket, arg);
+      // Update presence for all players so friends see roomStatus: "playing"
+      const { roomId } = arg || {};
+      if (!roomId) return;
+      try {
+        const startedRoom = await Room.findOne({ roomId }).lean();
+        if (startedRoom?.status === "playing") {
+          for (const p of startedRoom.players) {
+            const pid = p.player?.toString();
+            if (!pid) continue;
+            presenceService.setPlaying(pid, roomId, "playing");
+            notifyFriendsPresence(pid).catch(() => {});
+          }
+        }
+      } catch (err) {
+        console.error("[startGame] presence update error:", err);
+      }
+    });
 
     // Add more event listeners here
     socket.on("assignRoles", (arg) => assignRoles(io, socket, arg));

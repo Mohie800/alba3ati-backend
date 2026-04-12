@@ -24,10 +24,10 @@ function setOnline(userId) {
   presenceMap.set(id, { status: "online" });
 }
 
-function setPlaying(userId, roomId) {
+function setPlaying(userId, roomId, roomStatus = "waiting") {
   const id = normalize(userId);
   cancelPendingOffline(id);
-  presenceMap.set(id, { status: "playing", roomId });
+  presenceMap.set(id, { status: "playing", roomId, roomStatus });
 }
 
 function setOffline(userId) {
