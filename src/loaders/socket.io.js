@@ -342,9 +342,20 @@ module.exports = (server) => {
           const wasInGrace = isPlayerInGracePeriod(player);
           const wasInWaitingGrace = isPlayerInWaitingGracePeriod(player);
 
+          // Allow dead players who left mid-game to rejoin as spectators
+          const me = room.players.find(
+            (p) => p.player._id.toString() === player,
+          );
+          const isDeadSpectator =
+            room.status === "playing" &&
+            me &&
+            me.status === "dead" &&
+            me.leftMidGame;
+
           // Block duplicate joins for players who are already connected in the room.
-          // Rejoin is only allowed when the player is in a disconnect grace period.
-          if (!wasInGrace && !wasInWaitingGrace) {
+          // Rejoin is only allowed when the player is in a disconnect grace period
+          // or when a dead player returns to spectate.
+          if (!wasInGrace && !wasInWaitingGrace && !isDeadSpectator) {
             socket.emit("joinError", { message: "Already joined this room" });
             return;
           }
