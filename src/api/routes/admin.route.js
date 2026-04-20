@@ -21,6 +21,8 @@ router.post("/login", adminController.login);
 router.get("/profile", adminAuth, adminController.getProfile);
 router.get("/stats", adminAuth, statsController.getDashboardStats);
 router.get("/players", adminAuth, statsController.getPlayers);
+router.get("/online-players", adminAuth, statsController.getOnlinePlayers);
+router.get("/top-players-coins", adminAuth, statsController.getTopPlayersByCoins);
 router.get("/players/:id", adminAuth, statsController.getPlayerDetail);
 router.delete("/players/:id", adminAuth, statsController.deletePlayer);
 router.patch(
@@ -109,6 +111,13 @@ router.post(
   "/players/:id/adjust-coins",
   adminAuth,
   shopAdminController.adjustPlayerCoins,
+);
+
+// Player Name History (admin)
+router.get(
+  "/players/:id/name-history",
+  adminAuth,
+  statsController.getPlayerNameHistory,
 );
 
 module.exports = router;

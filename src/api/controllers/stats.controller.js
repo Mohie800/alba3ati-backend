@@ -3,6 +3,7 @@ const Room = require("../models/room.model");
 const Contact = require("../models/contact.model");
 const BannedDevice = require("../models/bannedDevice.model");
 const Report = require("../models/report.model");
+const NameChangeLog = require("../models/nameChangeLog.model");
 const presenceService = require("../services/presence.service");
 
 exports.getDashboardStats = async (req, res) => {
@@ -302,6 +303,72 @@ exports.getCoinStats = async (req, res) => {
         recentTransactions,
       },
     });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.getTopPlayersByCoins = async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+    const players = await User.find()
+      .select("_id name profilePicture coins stats.gamesPlayed stats.gamesWon createdAt")
+      .sort({ coins: -1 })
+      .limit(limit)
+      .lean();
+    res.json({ success: true, data: { players } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.getOnlinePlayers = async (req, res) => {
+  try {
+    const presencePlayers = presenceService.getOnlinePlayers();
+    if (presencePlayers.length === 0) {
+      return res.json({ success: true, data: { players: [] } });
+    }
+
+    const userIds = presencePlayers.map((p) => p.userId);
+    const users = await User.find({ _id: { $in: userIds } })
+      .select("_id name profilePicture coins stats.gamesPlayed")
+      .lean();
+
+    const userMap = {};
+    for (const u of users) {
+      userMap[u._id.toString()] = u;
+    }
+
+    const players = presencePlayers
+      .map((p) => {
+        const user = userMap[p.userId];
+        if (!user) return null;
+        return {
+          _id: user._id,
+          name: user.name,
+          profilePicture: user.profilePicture,
+          coins: user.coins,
+          gamesPlayed: user.stats?.gamesPlayed ?? 0,
+          status: p.status,
+          roomId: p.roomId || null,
+          roomStatus: p.roomStatus || null,
+        };
+      })
+      .filter(Boolean);
+
+    res.json({ success: true, data: { players } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.getPlayerNameHistory = async (req, res) => {
+  try {
+    const logs = await NameChangeLog.find({ user: req.params.id })
+      .sort({ changedAt: -1 })
+      .limit(50)
+      .lean();
+    res.json({ success: true, data: { logs } });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
   }

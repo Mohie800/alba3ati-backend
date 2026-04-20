@@ -115,6 +115,14 @@ function getOnlineCount() {
   return presenceMap.size;
 }
 
+function getOnlinePlayers() {
+  const result = [];
+  for (const [userId, presence] of presenceMap) {
+    result.push({ userId, ...presence });
+  }
+  return result;
+}
+
 module.exports = {
   setOnline,
   setPlaying,
@@ -128,4 +136,5 @@ module.exports = {
   setCachedFriends,
   invalidateFriendsCache,
   getOnlineCount,
+  getOnlinePlayers,
 };

@@ -1,5 +1,6 @@
 const User = require("../models/user.model");
 const BannedDevice = require("../models/bannedDevice.model");
+const NameChangeLog = require("../models/nameChangeLog.model");
 const config = require("../../config/config");
 const { recordNewUser } = require("../game/dailyStats.game");
 const { verifyGoogleToken } = require("../../utils/google");
@@ -171,19 +172,26 @@ exports.updateName = async (req, res) => {
       });
     }
 
-    const user = await User.findByIdAndUpdate(
-      userId,
-      { name: name.trim() },
-      { new: true },
-    );
-
-    if (!user) {
+    const existing = await User.findById(userId);
+    if (!existing) {
       return res.status(404).json({ success: false, error: "User not found" });
     }
 
+    const trimmedName = name.trim();
+    if (existing.name !== trimmedName) {
+      await NameChangeLog.create({
+        user: userId,
+        oldName: existing.name,
+        newName: trimmedName,
+      });
+    }
+
+    existing.name = trimmedName;
+    await existing.save();
+
     res.json({
       success: true,
-      data: { user: { id: user._id, name: user.name } },
+      data: { user: { id: existing._id, name: existing.name } },
     });
   } catch (error) {
     console.error("Update name error:", error);
