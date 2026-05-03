@@ -34,17 +34,50 @@ const getSocketCount = (io, roomId) => {
   return socketsInRoom ? socketsInRoom.size : 0;
 };
 
+// Counts only non-spectator sockets so spectator joins/leaves never affect
+// activePlayers, host migration, grace-period logic, or "room is empty" cleanup.
+const getPlayerSocketCount = (io, roomId) => {
+  const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
+  if (!socketsInRoom) return 0;
+  let count = 0;
+  for (const sid of socketsInRoom) {
+    const s = io.sockets.sockets.get(sid);
+    if (s && !s.isSpectator) count++;
+  }
+  return count;
+};
+
 const joinRoom = async (io, socket, roomId) => {
   socket.join(roomId);
-  // Sync activePlayers from Socket.IO (source of truth)
-  const count = getSocketCount(io, roomId);
+  // Sync activePlayers from Socket.IO (spectators excluded)
+  const count = getPlayerSocketCount(io, roomId);
   await Room.updateOne({ roomId }, { $set: { activePlayers: count } });
+};
+
+const leaveSpectator = async (io, socket, roomId, userId) => {
+  socket.leave(roomId);
+  if (!userId) return;
+  try {
+    const updated = await Room.findOneAndUpdate(
+      { roomId },
+      { $pull: { spectators: { user: userId } } },
+      { new: true },
+    );
+    if (updated) {
+      io.to(roomId).emit("spectatorCountChanged", {
+        roomId,
+        count: updated.spectators.length,
+      });
+    }
+  } catch (err) {
+    console.error("[leaveSpectator] error:", err);
+  }
 };
 
 const leaveRoom = async (io, socket, roomId, playerId, intentional = false) => {
   socket.leave(roomId);
 
-  const count = getSocketCount(io, roomId);
+  const count = getPlayerSocketCount(io, roomId);
 
   const room = await Room.findOne({ roomId }).populate("players.player");
   if (!room) return;
@@ -175,4 +208,11 @@ const publicRoom = async (io, socket, { roomId, isPublic }) => {
   }
 };
 
-module.exports = { getActiveRooms, joinRoom, leaveRoom, publicRoom };
+module.exports = {
+  getActiveRooms,
+  joinRoom,
+  leaveRoom,
+  publicRoom,
+  leaveSpectator,
+  getPlayerSocketCount,
+};

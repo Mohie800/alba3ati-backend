@@ -132,25 +132,20 @@ module.exports.claculateResult = async (io, roomId) => {
       }
     });
 
-    // Snapshot after ballah/wadAlzalat kills, before abuJanzeer
-    const beforeAbuJanzeer = {};
-    room.players.forEach((p) => {
-      beforeAbuJanzeer[p.player._id.toString()] = p.status;
-    });
-
-    // Abu Janzeer kills — unblockable (not affected by omda or damazeen protection)
+    // Abu Janzeer kills — unblockable (not affected by omda or damazeen protection).
+    // Tracked independently of other kill phases: any target alive at the start of the
+    // night gets attributed to Abu Janzeer, even if Ballah/ba3ati hit the same player.
     const abuJanzeerTargets = room.abuJanzeerTargets.map((t) => t.target);
-    room.players.forEach((player) => {
-      if (player.status === "dead") return;
-      if (abuJanzeerTargets.includes(player.player._id.toString())) {
+    const abuJanzeerDead = [];
+    abuJanzeerTargets.forEach((targetId) => {
+      if (wasAlive[targetId] !== "alive") return;
+      abuJanzeerDead.push(targetId);
+      const player = room.players.find(
+        (p) => p.player._id.toString() === targetId,
+      );
+      if (player && player.status === "alive") {
         player.status = "dead";
       }
-    });
-
-    // Snapshot immediately after Abu Janzeer kills (for accurate Abu attribution)
-    const afterAbuJanzeer = {};
-    room.players.forEach((p) => {
-      afterAbuJanzeer[p.player._id.toString()] = p.status;
     });
 
     // Ba3ati Kabeer convert — converts target to ba3ati (roleId "1") if not protected
@@ -178,15 +173,6 @@ module.exports.claculateResult = async (io, roomId) => {
         (p) =>
           wasAlive[p.player._id.toString()] === "alive" &&
           beforeBallah[p.player._id.toString()] === "dead",
-      )
-      .map((p) => p.player._id.toString());
-
-    // Determine who died from abuJanzeer (separate list)
-    const abuJanzeerDead = room.players
-      .filter(
-        (p) =>
-          beforeAbuJanzeer[p.player._id.toString()] === "alive" &&
-          afterAbuJanzeer[p.player._id.toString()] === "dead",
       )
       .map((p) => p.player._id.toString());
 

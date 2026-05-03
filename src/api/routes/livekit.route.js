@@ -5,7 +5,7 @@ const config = require("../../config/config");
 const router = express.Router();
 
 router.get("/token", async (req, res) => {
-  const { roomId, userId, userName } = req.query;
+  const { roomId, userId, userName, mode } = req.query;
 
   if (!roomId || !userId || !userName) {
     return res
@@ -17,6 +17,8 @@ router.get("/token", async (req, res) => {
     return res.status(500).json({ error: "LiveKit is not configured" });
   }
 
+  const isSpectator = mode === "spectator";
+
   const at = new AccessToken(config.livekitApiKey, config.livekitApiSecret, {
     identity: userId,
     name: userName,
@@ -25,7 +27,7 @@ router.get("/token", async (req, res) => {
   at.addGrant({
     roomJoin: true,
     room: `alba3ati-${roomId}`,
-    canPublish: true,
+    canPublish: !isSpectator,
     canSubscribe: true,
   });
 

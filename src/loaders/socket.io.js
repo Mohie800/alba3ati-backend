@@ -42,7 +42,9 @@ const {
   joinRoom,
   leaveRoom,
   publicRoom,
+  leaveSpectator,
 } = require("../api/controllers/room.controller");
+const { MAX_SPECTATORS } = require("../utils/constants");
 const {
   cancelGracePeriod,
   isPlayerInGracePeriod,
@@ -419,7 +421,12 @@ module.exports = (server) => {
             return;
           }
           if (room.status !== "waiting") {
-            socket.emit("joinError", { message: "Game already started" });
+            // Game in progress: don't reject — let the client offer spectate mode.
+            socket.emit("gameRunning", {
+              roomId,
+              playerCount: room.players.length,
+              phase: room.gamePhase || "playing",
+            });
             return;
           }
 
@@ -517,6 +524,96 @@ module.exports = (server) => {
       }
     });
 
+    // Spectate an in-progress room (read-only join)
+    socket.on("spectateRoom", async ({ roomId, userId }) => {
+      try {
+        if (!roomId || !userId) {
+          socket.emit("spectateError", { code: "INVALID_REQUEST" });
+          return;
+        }
+
+        const appSettings = await AppSettings.getSettings();
+        if (appSettings.maintenanceMode) {
+          socket.emit("maintenanceMode", {
+            message: appSettings.maintenanceMessage,
+          });
+          return;
+        }
+
+        const room = await Room.findOne({ roomId }).populate("players.player");
+        if (!room) {
+          socket.emit("spectateError", { code: "ROOM_NOT_FOUND" });
+          return;
+        }
+        if (room.status !== "playing") {
+          socket.emit("spectateError", { code: "ROOM_NOT_PLAYING" });
+          return;
+        }
+
+        // If user is already a player in this room, never put them in `spectators`.
+        // Tell the client to use the normal joinRoom flow (handles the dead-rejoin
+        // and grace-period reconnect paths).
+        const isPlayer = room.players.some(
+          (p) => p.player._id.toString() === userId,
+        );
+        if (isPlayer) {
+          socket.emit("spectateError", { code: "USER_IS_PLAYER" });
+          return;
+        }
+
+        if ((room.spectators?.length || 0) >= MAX_SPECTATORS) {
+          socket.emit("spectateError", { code: "SPECTATORS_FULL" });
+          return;
+        }
+
+        // Add to spectators only if not already present (multi-device safe)
+        const alreadySpectating = (room.spectators || []).some(
+          (s) => s.user?.toString() === userId,
+        );
+        if (!alreadySpectating) {
+          await Room.updateOne(
+            { roomId },
+            { $push: { spectators: { user: userId } } },
+          );
+        }
+
+        const updatedRoom = await Room.findOne({ roomId }).populate(
+          "players.player",
+        );
+
+        socket.join(roomId);
+        socket.gameRoomId = roomId;
+        socket.playerId = userId;
+        socket.isSpectator = true;
+
+        registerUserSocket(socket, userId);
+        // Spectators are "online", not "playing" — friends-list shouldn't show
+        // them as in a room.
+        presenceService.setOnline(userId);
+        notifyFriendsPresence(userId);
+
+        socket.emit("spectatorJoined", {
+          room: updatedRoom,
+          gamePhase: updatedRoom.gamePhase || "night",
+          timer: getRemainingTime(roomId),
+          gameResult: updatedRoom.gameResult || null,
+          rematchAccepted: updatedRoom.rematchAccepted || [],
+          rematchTimer: getRematchRemainingTime(roomId),
+          mutedPlayerIds: getMutedPlayers(roomId),
+          declarations: getRoleDeclarations(roomId),
+          isSpectator: true,
+        });
+
+        io.to(roomId).emit("spectatorCountChanged", {
+          roomId,
+          count: updatedRoom.spectators?.length || 0,
+        });
+      } catch (err) {
+        console.error("[spectateRoom] error:", err);
+        socket.emit("spectateError", { code: "INTERNAL_ERROR" });
+      }
+    });
+
     // Quick play matchmaking
     socket.on("quickPlay", async (playerId) => {
       try {
@@ -577,7 +674,12 @@ module.exports = (server) => {
       console.log("Client disconnected");
       const playerId = socket.playerId;
       if (socket.gameRoomId) {
-        leaveRoom(io, socket, socket.gameRoomId, playerId, false);
+        if (socket.isSpectator) {
+          // Spectators have no grace period, no host migration, no death.
+          leaveSpectator(io, socket, socket.gameRoomId, playerId);
+        } else {
+          leaveRoom(io, socket, socket.gameRoomId, playerId, false);
+        }
         socket.gameRoomId = null;
       }
 
@@ -586,16 +688,19 @@ module.exports = (server) => {
         unregisterUserSocket(socket, playerId);
       }
       socket.playerId = null;
+      socket.isSpectator = false;
     });
 
     socket.on("home", async () => {
       const playerId = socket.playerId;
       let roomId = socket.gameRoomId;
+      const wasSpectator = socket.isSpectator;
 
       // If socket state is out of sync, fall back to DB to find any active room
       // the player is still part of. This covers race conditions where the socket
       // lost its gameRoomId but the backend still has the player in a room.
-      if (!roomId && playerId) {
+      // Skip the DB fallback for spectators — they're not in `players`.
+      if (!roomId && playerId && !wasSpectator) {
         try {
           const staleRoom = await Room.findOne({
             status: { $in: ["waiting", "playing"] },
@@ -610,8 +715,13 @@ module.exports = (server) => {
       }
 
       if (roomId) {
-        leaveRoom(io, socket, roomId, playerId, true);
+        if (wasSpectator) {
+          leaveSpectator(io, socket, roomId, playerId);
+        } else {
+          leaveRoom(io, socket, roomId, playerId, true);
+        }
         socket.gameRoomId = null;
+        socket.isSpectator = false;
         // Don't null playerId — socket is still connected, need it for disconnect cleanup
       }
 
@@ -622,8 +732,16 @@ module.exports = (server) => {
       }
     });
 
+    // Wraps a game-action listener so spectators (read-only sockets) cannot
+    // submit votes, mute, declare roles, accept rematches, etc.
+    const playerOnly = (handler) => (arg) => {
+      if (socket.isSpectator) return;
+      return handler(arg);
+    };
+
     //start the game (do not allow players to join)
     socket.on("startGame", async (arg) => {
+      if (socket.isSpectator) return;
       await startGame(io, socket, arg);
       // Update presence for all players so friends see roomStatus: "playing"
       const { roomId } = arg || {};
@@ -644,44 +762,86 @@ module.exports = (server) => {
     });
 
     // Add more event listeners here
-    socket.on("assignRoles", (arg) => assignRoles(io, socket, arg));
+    socket.on("assignRoles", playerOnly((arg) => assignRoles(io, socket, arg)));
 
     //----------------------------------------------------------------
     //acions
-    socket.on("b3atiAction", (arg) => ba3atiAction(io, socket, arg));
-    socket.on("al3omdaAction", (arg) => al3omdaAction(io, socket, arg));
-    socket.on("damazeenAction", (arg) => damazeenAction(io, socket, arg));
-    socket.on("damazeenProtection", (arg) =>
-      damazeenProtection(io, socket, arg),
+    socket.on("b3atiAction", playerOnly((arg) => ba3atiAction(io, socket, arg)));
+    socket.on(
+      "al3omdaAction",
+      playerOnly((arg) => al3omdaAction(io, socket, arg)),
     );
-    socket.on("sitAlwada3Action", (arg) => sitAlwada3Action(io, socket, arg));
-    socket.on("abuJanzeerAction", (arg) => abuJanzeerAction(io, socket, arg));
-    socket.on("ballahAction", (arg) => ballahAction(io, socket, arg));
-    socket.on("ba3atiKabeerAction", (arg) =>
-      ba3atiKabeerAction(io, socket, arg),
+    socket.on(
+      "damazeenAction",
+      playerOnly((arg) => damazeenAction(io, socket, arg)),
     );
-    socket.on("ba3atiKabeerConvert", (arg) =>
-      ba3atiKabeerConvert(io, socket, arg),
+    socket.on(
+      "damazeenProtection",
+      playerOnly((arg) => damazeenProtection(io, socket, arg)),
     );
-    socket.on("jenabuAction", (arg) => jenabuAction(io, socket, arg));
-    socket.on("wadAlzalatAction", (arg) => wadAlzalatAction(io, socket, arg));
-    socket.on("skipNightAction", (arg) => skipNightAction(io, socket, arg));
+    socket.on(
+      "sitAlwada3Action",
+      playerOnly((arg) => sitAlwada3Action(io, socket, arg)),
+    );
+    socket.on(
+      "abuJanzeerAction",
+      playerOnly((arg) => abuJanzeerAction(io, socket, arg)),
+    );
+    socket.on(
+      "ballahAction",
+      playerOnly((arg) => ballahAction(io, socket, arg)),
+    );
+    socket.on(
+      "ba3atiKabeerAction",
+      playerOnly((arg) => ba3atiKabeerAction(io, socket, arg)),
+    );
+    socket.on(
+      "ba3atiKabeerConvert",
+      playerOnly((arg) => ba3atiKabeerConvert(io, socket, arg)),
+    );
+    socket.on(
+      "jenabuAction",
+      playerOnly((arg) => jenabuAction(io, socket, arg)),
+    );
+    socket.on(
+      "wadAlzalatAction",
+      playerOnly((arg) => wadAlzalatAction(io, socket, arg)),
+    );
+    socket.on(
+      "skipNightAction",
+      playerOnly((arg) => skipNightAction(io, socket, arg)),
+    );
     //................................................................
 
     //----------------------------------------------------------------
     //votes
-    socket.on("vote", (arg) => voteSubmit(io, socket, arg));
-    socket.on("skipVote", (arg) => voteSkip(io, socket, arg));
-    socket.on("skipDiscussion", (arg) => skipDiscussionVote(io, socket, arg));
-    socket.on("mutePlayer", (arg) => mutePlayerToggle(io, socket, arg));
-    socket.on("declareRole", (arg) => handleDeclareRole(io, socket, arg));
+    socket.on("vote", playerOnly((arg) => voteSubmit(io, socket, arg)));
+    socket.on("skipVote", playerOnly((arg) => voteSkip(io, socket, arg)));
+    socket.on(
+      "skipDiscussion",
+      playerOnly((arg) => skipDiscussionVote(io, socket, arg)),
+    );
+    socket.on(
+      "mutePlayer",
+      playerOnly((arg) => mutePlayerToggle(io, socket, arg)),
+    );
+    socket.on(
+      "declareRole",
+      playerOnly((arg) => handleDeclareRole(io, socket, arg)),
+    );
     //............................................................
 
     //----------------------------------------------------------------
     //rematch
-    socket.on("rematchStart", (arg) => startRematch(io, socket, arg));
-    socket.on("rematchAccept", (arg) => acceptRematch(io, socket, arg));
-    socket.on("rematchBegin", (arg) => beginRematch(io, socket, arg));
+    socket.on("rematchStart", playerOnly((arg) => startRematch(io, socket, arg)));
+    socket.on(
+      "rematchAccept",
+      playerOnly((arg) => acceptRematch(io, socket, arg)),
+    );
+    socket.on(
+      "rematchBegin",
+      playerOnly((arg) => beginRematch(io, socket, arg)),
+    );
     //............................................................
   });
 

@@ -65,6 +65,12 @@ const RoomSchema = new mongoose.Schema(
     wadAlzalatTargets: [{ player: { type: String }, target: { type: String } }],
     wadAlzalatUsedBy: [{ type: String }],
     rematchAccepted: [{ type: String }],
+    spectators: [
+      {
+        user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        joinedAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true },
 );
