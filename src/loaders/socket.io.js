@@ -4,6 +4,7 @@ const config = require("../config/config");
 const Room = require("../api/models/room.model");
 const User = require("../api/models/user.model");
 const GameRound = require("../api/models/gameRound.model");
+const BannedDevice = require("../api/models/bannedDevice.model");
 const {
   sendPushNotification,
 } = require("../api/services/pushNotification.service");
@@ -74,6 +75,30 @@ module.exports = (server) => {
     },
     pingInterval: 25000,
     pingTimeout: 20000,
+  });
+
+  // Ban middleware — rejects connections from banned devices before any handlers run
+  io.use(async (socket, next) => {
+    const { deviceId } = socket.handshake.auth;
+    if (!deviceId) return next();
+
+    try {
+      const normalizedId = deviceId.trim().toLowerCase();
+      const banned = await BannedDevice.findOne({ deviceId: normalizedId });
+
+      if (!banned) return next();
+
+      if (banned.expiresAt && banned.expiresAt < new Date()) {
+        await BannedDevice.deleteOne({ _id: banned._id });
+        return next();
+      }
+
+      const err = new Error("DEVICE_BANNED");
+      err.data = { reason: banned.reason };
+      next(err);
+    } catch {
+      next(); // fail open on DB error to avoid locking out all users
+    }
   });
 
   function getRandomString(length = 7) {
@@ -566,16 +591,12 @@ module.exports = (server) => {
           return;
         }
 
-        // Add to spectators only if not already present (multi-device safe)
-        const alreadySpectating = (room.spectators || []).some(
-          (s) => s.user?.toString() === userId,
+        // Add to spectators atomically — $addToSet prevents duplicates even
+        // when two sockets from the same user race through simultaneously.
+        await Room.updateOne(
+          { roomId },
+          { $addToSet: { spectators: { user: userId } } },
         );
-        if (!alreadySpectating) {
-          await Room.updateOne(
-            { roomId },
-            { $push: { spectators: { user: userId } } },
-          );
-        }
 
         const updatedRoom = await Room.findOne({ roomId }).populate(
           "players.player",
