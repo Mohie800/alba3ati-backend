@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const shopItemSchema = new mongoose.Schema(
   {
     itemId: { type: String, required: true, unique: true },
-    type: { type: String, enum: ["frame"], default: "frame" },
+    type: { type: String, enum: ["frame", "nameColor"], default: "frame" },
     name: { type: String, required: true },
     price: { type: Number, required: true },
     rarity: {

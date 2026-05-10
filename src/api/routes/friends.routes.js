@@ -16,6 +16,7 @@ const {
   getOutgoingRequests,
   getBatchStatus,
   searchPlayers,
+  getBlockedUsers,
 } = require("../services/friendship.service");
 
 // Rate limit: max 20 friend requests per hour per user
@@ -148,6 +149,22 @@ router.post("/unblock", async (req, res) => {
       return res.status(400).json({ error: "معرّف غير صالح" });
     }
     const result = await unblockPlayer(userId, targetUserId);
+    res.json(result);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// GET /api/friends/blocks/:userId?page=1&limit=20
+router.get("/blocks/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!isValidId(userId)) {
+      return res.status(400).json({ error: "معرّف غير صالح" });
+    }
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+    const result = await getBlockedUsers(userId, page, limit);
     res.json(result);
   } catch (err) {
     handleError(res, err);

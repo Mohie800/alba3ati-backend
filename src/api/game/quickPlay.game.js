@@ -16,6 +16,7 @@ const {
   cancelWaitingGracePeriod,
 } = require("./disconnect.game");
 const presenceService = require("../services/presence.service");
+const { getBlockPartners } = require("../services/friendship.service");
 
 // In-memory state
 let activeQuickPlayRoomId = null;
@@ -86,6 +87,23 @@ const findOrCreateQuickPlayRoom = async (io, socket, playerId) => {
       if (room && room.players.length >= QUICK_PLAY_MAX_PLAYERS) {
         activeQuickPlayRoomId = null;
         room = null;
+      }
+
+      // Block conflict: skip a room containing anyone the joiner has blocked
+      // (or who has blocked the joiner). Falls through to create a new room
+      // and replace the active slot so future joiners match the new room.
+      // The orphaned room keeps its existing players but won't accept new ones.
+      if (room) {
+        const partners = await getBlockPartners(playerId);
+        if (partners.size > 0) {
+          const conflict = room.players.some((p) =>
+            partners.has(p.player._id.toString()),
+          );
+          if (conflict) {
+            activeQuickPlayRoomId = null;
+            room = null;
+          }
+        }
       }
     }
 

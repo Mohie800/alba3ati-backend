@@ -10,6 +10,10 @@ const {
 } = require("../api/services/pushNotification.service");
 const presenceService = require("../api/services/presence.service");
 const friendshipService = require("../api/services/friendship.service");
+const {
+  isBlockedBetween,
+  getBlockPartners,
+} = require("../api/services/friendship.service");
 const { assignRoles } = require("../api/game/roles.game");
 const {
   ba3atiAction,
@@ -51,6 +55,7 @@ const {
   isPlayerInGracePeriod,
   cancelWaitingGracePeriod,
   isPlayerInWaitingGracePeriod,
+  startGraceSweep,
 } = require("../api/game/disconnect.game");
 const initChat = require("../api/services/chat.service");
 const AppSettings = require("../api/models/appSettings.model");
@@ -122,39 +127,6 @@ module.exports = (server) => {
   // Inject emitToUser into friendship service so it can emit events on request/accept/etc.
   friendshipService.setEmitToUser(emitToUser);
 
-  /**
-   * Notify a player's online friends that they joined/created a room.
-   * Throttled to once per 5 minutes per (player, friend) pair.
-   */
-  async function notifyFriendsJoinedRoom(userId, playerName, roomId, isPublic) {
-    try {
-      const [friendIds, player] = await Promise.all([
-        friendshipService.getFriendIds(userId.toString()),
-        User.findById(userId).select("name"),
-      ]);
-      const name = player?.name || playerName;
-
-      for (const friendId of friendIds) {
-        const allowed = friendshipService.checkAndSetNotifyThrottle(
-          userId.toString(),
-          friendId,
-        );
-        if (!allowed) continue;
-
-        if (presenceService.isOnline(friendId)) {
-          // Real-time event for online friends
-          emitToUser(friendId, "friendJoinedRoom", {
-            friend: { _id: userId, name },
-            roomId,
-            isPublic: !!isPublic,
-          });
-        }
-      }
-    } catch (err) {
-      // Non-critical
-    }
-  }
-
   // Initialize chat namespace
   initChat(io);
 
@@ -172,6 +144,10 @@ module.exports = (server) => {
         );
       }
     });
+
+  // Sweep orphaned grace-period timers (safety net for room-end paths
+  // that don't call clearAllGracePeriodsForRoom)
+  startGraceSweep();
 
   // Periodic cleanup: end stale rooms with 0 active sockets every 5 minutes
   setInterval(
@@ -250,6 +226,25 @@ module.exports = (server) => {
     }
   }
 
+  // ---- Per-socket rate limiter for gameplay events ----
+  // Sliding-1s window. Drops events silently above the limit so accidental
+  // double-taps and abusive spam can't flood vote/action handlers.
+  const ACTION_RATE_LIMIT = 5;
+  const ACTION_RATE_WINDOW_MS = 1000;
+  const actionBuckets = new Map(); // socketId -> { windowStart, count }
+
+  function consumeActionToken(socketId) {
+    const now = Date.now();
+    const bucket = actionBuckets.get(socketId);
+    if (!bucket || now - bucket.windowStart >= ACTION_RATE_WINDOW_MS) {
+      actionBuckets.set(socketId, { windowStart: now, count: 1 });
+      return true;
+    }
+    if (bucket.count >= ACTION_RATE_LIMIT) return false;
+    bucket.count++;
+    return true;
+  }
+
   // Connection handler
   io.on("connection", (socket) => {
     console.log("New client connected");
@@ -305,14 +300,6 @@ module.exports = (server) => {
         presenceService.setPlaying(host, roomId);
         notifyFriendsPresence(host);
 
-        // Notify friends that this player created a room
-        notifyFriendsJoinedRoom(
-          host,
-          room.host?.toString?.() || host,
-          roomId,
-          room.isPublic,
-        ).catch(() => {});
-
         // Notify the host
         socket.emit("roomCreated", { room });
 
@@ -355,6 +342,20 @@ module.exports = (server) => {
               message: appSettings.maintenanceMessage,
             });
             return;
+          }
+
+          // Block enforcement: refuse if joiner blocks (or is blocked by) anyone
+          // already in the room. Reconnects skip this so an existing player can
+          // always rejoin after a transient block was applied mid-game.
+          const partners = await getBlockPartners(player);
+          if (partners.size > 0) {
+            const blocked = room.players.some((p) =>
+              partners.has(p.player._id.toString()),
+            );
+            if (blocked) {
+              socket.emit("joinError", { message: "لا يمكنك الانضمام إلى هذه الغرفة" });
+              return;
+            }
           }
         }
 
@@ -474,12 +475,6 @@ module.exports = (server) => {
           registerUserSocket(socket, player);
           presenceService.setPlaying(player, roomId);
           notifyFriendsPresence(player);
-          notifyFriendsJoinedRoom(
-            player,
-            player,
-            roomId,
-            updatedRoom.isPublic,
-          ).catch(() => {});
 
           socket.emit("roomJoined", updatedRoom);
           io.to(roomId).emit("playerJoined", updatedRoom);
@@ -591,11 +586,12 @@ module.exports = (server) => {
           return;
         }
 
-        // Add to spectators atomically — $addToSet prevents duplicates even
-        // when two sockets from the same user race through simultaneously.
+        // Add to spectators only if not already present — $addToSet is unsafe
+        // here because the joinedAt default produces a different subdocument on
+        // each cast, causing duplicates on every rejoin.
         await Room.updateOne(
-          { roomId },
-          { $addToSet: { spectators: { user: userId } } },
+          { roomId, "spectators.user": { $ne: userId } },
+          { $push: { spectators: { user: userId } } },
         );
 
         const updatedRoom = await Room.findOne({ roomId }).populate(
@@ -681,9 +677,9 @@ module.exports = (server) => {
           return;
         }
 
-        const sender = await User.findById(playerId).select("name frame");
+        const sender = await User.findById(playerId).select("name frame nameColor");
         emitToUser(friendId, "friendInvite", {
-          from: { _id: playerId, name: sender?.name },
+          from: { _id: playerId, name: sender?.name, nameColor: sender?.nameColor || null },
           roomId,
         });
       } catch (err) {
@@ -710,10 +706,17 @@ module.exports = (server) => {
       }
       socket.playerId = null;
       socket.isSpectator = false;
+      actionBuckets.delete(socket.id);
     });
 
-    socket.on("home", async () => {
-      const playerId = socket.playerId;
+    socket.on("home", async (clientUserId) => {
+      // Prefer the trusted server-side socket.playerId; fall back to the
+      // client-supplied userId so a fresh socket sitting on the home screen
+      // (no room joined yet) still registers presence and counts as online.
+      const playerId = socket.playerId || clientUserId || null;
+      if (playerId && !socket.playerId) {
+        socket.playerId = playerId;
+      }
       let roomId = socket.gameRoomId;
       const wasSpectator = socket.isSpectator;
 
@@ -746,17 +749,22 @@ module.exports = (server) => {
         // Don't null playerId — socket is still connected, need it for disconnect cleanup
       }
 
-      // Player is back at home — mark online regardless of room state
+      // Player is back at home — mark online regardless of room state.
+      // registerUserSocket is idempotent (Set add) and required so disconnect
+      // properly schedules offline for users that reach home before any room.
       if (playerId) {
+        registerUserSocket(socket, playerId);
         presenceService.setOnline(playerId);
         notifyFriendsPresence(playerId);
       }
     });
 
     // Wraps a game-action listener so spectators (read-only sockets) cannot
-    // submit votes, mute, declare roles, accept rematches, etc.
+    // submit votes, mute, declare roles, accept rematches, etc. Also enforces
+    // a per-socket rate limit so vote/action events can't be flooded.
     const playerOnly = (handler) => (arg) => {
       if (socket.isSpectator) return;
+      if (!consumeActionToken(socket.id)) return;
       return handler(arg);
     };
 

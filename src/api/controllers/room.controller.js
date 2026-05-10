@@ -18,7 +18,7 @@ const { clearRematchTimer } = require("../game/rematch.game");
 const getActiveRooms = async () => {
   try {
     const activeRooms = await Room.find({
-      status: "waiting",
+      status: { $in: ["waiting", "playing"] },
       isPublic: true,
       isQuickPlay: { $ne: true },
     }).populate("players.player");

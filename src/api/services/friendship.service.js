@@ -15,18 +15,7 @@ function setEmitToUser(fn) {
   emitToUser = fn;
 }
 
-// Throttle map for friendJoinedRoom notifications: Map<`${userId}:${friendId}`, expiresAt>
-const notifyThrottle = new Map();
-const NOTIFY_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_FRIENDS = 200;
-
-// Periodic sweep of expired throttle entries (every 10 minutes)
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, expiresAt] of notifyThrottle) {
-    if (expiresAt <= now) notifyThrottle.delete(key);
-  }
-}, 10 * 60 * 1000);
 
 /**
  * Send a friend request from userId to targetUserId.
@@ -38,8 +27,8 @@ async function sendRequest(userId, targetUserId) {
 
   // Check both users exist
   const [user, target] = await Promise.all([
-    User.findById(userId).select("name frame stats friendCount"),
-    User.findById(targetUserId).select("name frame stats friendCount notificationPreferences expoPushToken"),
+    User.findById(userId).select("name frame nameColor stats friendCount"),
+    User.findById(targetUserId).select("name frame nameColor stats friendCount notificationPreferences expoPushToken"),
   ]);
   if (!user || !target) {
     throw Object.assign(new Error("المستخدم غير موجود"), { status: 404 });
@@ -90,6 +79,7 @@ async function sendRequest(userId, targetUserId) {
             _id: user._id,
             name: user.name,
             frame: user.frame,
+            nameColor: user.nameColor,
             stats: user.stats,
             presence,
           },
@@ -112,6 +102,7 @@ async function sendRequest(userId, targetUserId) {
         _id: user._id,
         name: user.name,
         frame: user.frame,
+        nameColor: user.nameColor,
         stats: user.stats,
       },
     });
@@ -160,13 +151,14 @@ async function acceptRequest(userId, requesterId) {
 
   // Notify requester
   if (emitToUser) {
-    const accepter = await User.findById(userId).select("name frame stats");
+    const accepter = await User.findById(userId).select("name frame nameColor stats");
     const presence = getPresence(userId);
     emitToUser(requesterId, "friendRequestAccepted", {
       friend: {
         _id: accepter._id,
         name: accepter.name,
         frame: accepter.frame,
+        nameColor: accepter.nameColor,
         stats: accepter.stats,
         presence,
       },
@@ -331,6 +323,73 @@ async function unblockPlayer(userId, targetUserId) {
 }
 
 /**
+ * Returns true if either user has blocked the other. Used to gate
+ * room joins, invites, and quick-play matching. Unlike getBatchStatus
+ * (which masks block status), this is a backend-only enforcement check.
+ */
+async function isBlockedBetween(userIdA, userIdB) {
+  if (!userIdA || !userIdB || userIdA === userIdB) return false;
+  const block = await Friendship.findOne({
+    status: "blocked",
+    $or: [
+      { requester: userIdA, recipient: userIdB },
+      { requester: userIdB, recipient: userIdA },
+    ],
+  })
+    .select("_id")
+    .lean();
+  return !!block;
+}
+
+/**
+ * Returns the set of user IDs that the given user has blocked OR has
+ * been blocked by. Single round-trip — used to filter candidate rooms
+ * during quick-play matching.
+ */
+async function getBlockPartners(userId) {
+  if (!userId) return new Set();
+  const blocks = await Friendship.find({
+    status: "blocked",
+    $or: [{ requester: userId }, { recipient: userId }],
+  })
+    .select("requester recipient")
+    .lean();
+
+  const partners = new Set();
+  for (const b of blocks) {
+    const rid = b.requester.toString();
+    const sid = b.recipient.toString();
+    partners.add(rid === userId ? sid : rid);
+  }
+  return partners;
+}
+
+/**
+ * Get paginated list of users this user has blocked (one-way: requester=userId).
+ */
+async function getBlockedUsers(userId, page = 1, limit = 20) {
+  const skip = (page - 1) * limit;
+  const filter = { requester: userId, status: "blocked" };
+
+  const [blocks, total] = await Promise.all([
+    Friendship.find(filter)
+      .populate("recipient", "name frame nameColor")
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Friendship.countDocuments(filter),
+  ]);
+
+  const blocked = blocks
+    .map((b) => b.recipient)
+    .filter(Boolean)
+    .map((u) => ({ _id: u._id, name: u.name, frame: u.frame, nameColor: u.nameColor || null }));
+
+  return { blocked, total, page, limit };
+}
+
+/**
  * Get paginated friends list with presence.
  */
 async function getFriends(userId, page = 1, limit = 20) {
@@ -343,8 +402,8 @@ async function getFriends(userId, page = 1, limit = 20) {
   const [friendships, total] = await Promise.all([
     Friendship.find(filter)
       .populate([
-        { path: "requester", select: "name frame stats" },
-        { path: "recipient", select: "name frame stats" },
+        { path: "requester", select: "name frame nameColor stats" },
+        { path: "recipient", select: "name frame nameColor stats" },
       ])
       .skip(skip)
       .limit(limit)
@@ -359,6 +418,7 @@ async function getFriends(userId, page = 1, limit = 20) {
       _id: friend._id,
       name: friend.name,
       frame: friend.frame,
+      nameColor: friend.nameColor || null,
       stats: friend.stats,
       presence: getPresence(friend._id.toString()),
     };
@@ -386,7 +446,7 @@ async function getIncomingRequests(userId, page = 1, limit = 20) {
     recipient: userId,
     status: "pending",
   })
-    .populate("requester", "name frame stats")
+    .populate("requester", "name frame nameColor stats")
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
@@ -409,7 +469,7 @@ async function getOutgoingRequests(userId, page = 1, limit = 20) {
     requester: userId,
     status: "pending",
   })
-    .populate("recipient", "name frame stats")
+    .populate("recipient", "name frame nameColor stats")
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
@@ -482,7 +542,7 @@ async function searchPlayers(userId, query, page = 1, limit = 15) {
     const targetId = query.trim();
     if (targetId === userId) return [];
     const user = await User.findById(targetId)
-      .select("name frame stats")
+      .select("name frame nameColor stats")
       .lean();
     users = user ? [user] : [];
   } else {
@@ -490,7 +550,7 @@ async function searchPlayers(userId, query, page = 1, limit = 15) {
       { _id: { $ne: userId }, $text: { $search: query } },
       { score: { $meta: "textScore" } },
     )
-      .select("name frame stats")
+      .select("name frame nameColor stats")
       .sort({ score: { $meta: "textScore" } })
       .skip(skip)
       .limit(limit)
@@ -506,6 +566,7 @@ async function searchPlayers(userId, query, page = 1, limit = 15) {
     _id: u._id,
     name: u.name,
     frame: u.frame,
+    nameColor: u.nameColor || null,
     stats: { gamesWon: u.stats?.gamesWon, gamesPlayed: u.stats?.gamesPlayed },
     friendshipStatus: statuses[u._id.toString()] || "none",
   }));
@@ -533,17 +594,6 @@ async function getFriendIds(userId) {
   return friendIds;
 }
 
-/**
- * Check if throttle allows a notification from fromUserId to toUserId.
- */
-function checkAndSetNotifyThrottle(fromUserId, toUserId) {
-  const key = `${fromUserId}:${toUserId}`;
-  const expiry = notifyThrottle.get(key);
-  if (expiry && expiry > Date.now()) return false;
-  notifyThrottle.set(key, Date.now() + NOTIFY_THROTTLE_MS);
-  return true;
-}
-
 module.exports = {
   setEmitToUser,
   sendRequest,
@@ -559,5 +609,7 @@ module.exports = {
   getBatchStatus,
   searchPlayers,
   getFriendIds,
-  checkAndSetNotifyThrottle,
+  isBlockedBetween,
+  getBlockPartners,
+  getBlockedUsers,
 };

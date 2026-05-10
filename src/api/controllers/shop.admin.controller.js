@@ -11,19 +11,38 @@ exports.getShopItems = async (req, res) => {
   }
 };
 
+const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
+
+function validateItemPayload({ type, frameType, frameData }) {
+  if (type === "nameColor") {
+    if (frameType !== "color") {
+      return "nameColor items must have frameType 'color'";
+    }
+    if (!frameData || typeof frameData.color !== "string" || !HEX_RE.test(frameData.color)) {
+      return "frameData.color (#RRGGBB hex) is required for nameColor items";
+    }
+    return null;
+  }
+  if (frameType === "color" && (!frameData || !frameData.color)) {
+    return "frameData.color is required for color frames";
+  }
+  if (frameType === "gradient" && (!frameData || !Array.isArray(frameData.colors) || frameData.colors.length < 2)) {
+    return "frameData.colors (array of 2+) is required for gradient frames";
+  }
+  return null;
+}
+
 exports.createShopItem = async (req, res) => {
   try {
-    const { itemId, name, price, isActive, sortOrder, rarity, frameType, frameData } = req.body;
+    const { itemId, type, name, price, isActive, sortOrder, rarity, frameType, frameData } = req.body;
     if (!itemId || !name || price == null) {
       return res.status(400).json({ success: false, message: "itemId, name, and price are required" });
     }
-    if (frameType === "color" && (!frameData || !frameData.color)) {
-      return res.status(400).json({ success: false, message: "frameData.color is required for color frames" });
+    const validationErr = validateItemPayload({ type, frameType, frameData });
+    if (validationErr) {
+      return res.status(400).json({ success: false, message: validationErr });
     }
-    if (frameType === "gradient" && (!frameData || !Array.isArray(frameData.colors) || frameData.colors.length < 2)) {
-      return res.status(400).json({ success: false, message: "frameData.colors (array of 2+) is required for gradient frames" });
-    }
-    const item = await ShopItem.create({ itemId, name, price, isActive, sortOrder, rarity, frameType, frameData });
+    const item = await ShopItem.create({ itemId, type, name, price, isActive, sortOrder, rarity, frameType, frameData });
     res.json({ success: true, data: { item } });
   } catch (err) {
     if (err.code === 11000) {
@@ -35,10 +54,14 @@ exports.createShopItem = async (req, res) => {
 
 exports.updateShopItem = async (req, res) => {
   try {
-    const { name, price, isActive, sortOrder, rarity, frameType, frameData } = req.body;
+    const { type, name, price, isActive, sortOrder, rarity, frameType, frameData } = req.body;
+    const validationErr = validateItemPayload({ type, frameType, frameData });
+    if (validationErr) {
+      return res.status(400).json({ success: false, message: validationErr });
+    }
     const item = await ShopItem.findByIdAndUpdate(
       req.params.id,
-      { name, price, isActive, sortOrder, rarity, frameType, frameData },
+      { type, name, price, isActive, sortOrder, rarity, frameType, frameData },
       { new: true, runValidators: true },
     );
     if (!item) {

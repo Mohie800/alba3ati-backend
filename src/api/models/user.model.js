@@ -8,8 +8,10 @@ const userSchema = new mongoose.Schema({
   profilePicture: { type: String, default: null },
   deviceId: { type: String, default: null },
   frame: { type: String, default: null }, // Avatar frame ID (e.g. "wreath", "wings1")
+  nameColor: { type: String, default: null }, // itemId of equipped name color (e.g. "crimson")
   coins: { type: Number, default: 0 },
   ownedFrames: [{ type: String }],
+  ownedNameColors: [{ type: String }],
   expoPushToken: { type: String, default: null },
   notificationPreferences: {
     publicRooms: { type: Boolean, default: true },

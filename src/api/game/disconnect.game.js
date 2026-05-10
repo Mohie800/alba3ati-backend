@@ -274,6 +274,72 @@ const handleWaitingGracePeriodExpiry = async (io, roomId, playerId) => {
   }
 };
 
+// ---- Periodic sweep for orphaned grace timers ----
+
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+let sweepIntervalId = null;
+
+// Drop entries whose room no longer matches the state their timer assumes.
+// Catches leaks from code paths that end rooms without calling
+// clearAllGracePeriodsForRoom (e.g. the stale-room cleanup in socket.io.js).
+const sweepStaleGraceTimers = async () => {
+  try {
+    const referencedRoomIds = new Set();
+    for (const { roomId } of gracePeriods.values()) referencedRoomIds.add(roomId);
+    for (const { roomId } of waitingGracePeriods.values())
+      referencedRoomIds.add(roomId);
+
+    if (referencedRoomIds.size === 0) return;
+
+    const rooms = await Room.find(
+      { roomId: { $in: [...referencedRoomIds] } },
+      { roomId: 1, status: 1 },
+    ).lean();
+
+    const statusByRoomId = new Map(rooms.map((r) => [r.roomId, r.status]));
+
+    let removed = 0;
+
+    for (const [playerId, entry] of gracePeriods.entries()) {
+      if (statusByRoomId.get(entry.roomId) !== "playing") {
+        clearTimeout(entry.timerId);
+        gracePeriods.delete(playerId);
+        removed++;
+      }
+    }
+
+    for (const [playerId, entry] of waitingGracePeriods.entries()) {
+      if (statusByRoomId.get(entry.roomId) !== "waiting") {
+        clearTimeout(entry.timerId);
+        waitingGracePeriods.delete(playerId);
+        removed++;
+      }
+    }
+
+    if (removed > 0) {
+      console.log(
+        `[Disconnect] Sweep removed ${removed} orphaned grace timer(s)`,
+      );
+    }
+  } catch (error) {
+    console.error("[Disconnect] Grace sweep error:", error);
+  }
+};
+
+const startGraceSweep = (intervalMs = SWEEP_INTERVAL_MS) => {
+  if (sweepIntervalId) return sweepIntervalId;
+  sweepIntervalId = setInterval(sweepStaleGraceTimers, intervalMs);
+  if (typeof sweepIntervalId.unref === "function") sweepIntervalId.unref();
+  return sweepIntervalId;
+};
+
+const stopGraceSweep = () => {
+  if (sweepIntervalId) {
+    clearInterval(sweepIntervalId);
+    sweepIntervalId = null;
+  }
+};
+
 module.exports = {
   startGracePeriod,
   cancelGracePeriod,
@@ -283,4 +349,7 @@ module.exports = {
   startWaitingGracePeriod,
   cancelWaitingGracePeriod,
   isPlayerInWaitingGracePeriod,
+  startGraceSweep,
+  stopGraceSweep,
+  sweepStaleGraceTimers,
 };

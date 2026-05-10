@@ -11,7 +11,7 @@ exports.getLeaderboard = async (req, res) => {
         .sort({ "stats.gamesWon": -1, "stats.gamesPlayed": 1 })
         .skip(skip)
         .limit(limit)
-        .select("name stats frame")
+        .select("name stats frame nameColor")
         .lean(),
       User.countDocuments({ "stats.gamesPlayed": { $gt: 0 } }),
     ]);
@@ -21,6 +21,7 @@ exports.getLeaderboard = async (req, res) => {
       rank: skip + index + 1,
       name: player.name,
       frame: player.frame || null,
+      nameColor: player.nameColor || null,
       gamesPlayed: player.stats?.gamesPlayed || 0,
       gamesWon: player.stats?.gamesWon || 0,
       gamesLost: player.stats?.gamesLost || 0,

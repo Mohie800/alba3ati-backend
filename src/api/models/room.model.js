@@ -77,5 +77,13 @@ const RoomSchema = new mongoose.Schema(
 
 RoomSchema.index({ status: 1, isPublic: 1 });
 RoomSchema.index({ isQuickPlay: 1, status: 1 });
+// Stale-room cleanup: { status: $in, activePlayers: 0, updatedAt: $lt }
+// runs every 5 min in socket.io.js. Status prefix + updatedAt range filter.
+RoomSchema.index({ status: 1, updatedAt: -1 });
+// "home" event DB fallback + per-user room lookup:
+// Room.findOne({ status: $in, "players.player": playerId })
+// "players.player" is multikey; status is scalar — safe compound.
+// roomId already has a unique index from `unique: true`, so it's not re-declared here.
+RoomSchema.index({ "players.player": 1, status: 1 });
 
 module.exports = mongoose.model("Room", RoomSchema);
