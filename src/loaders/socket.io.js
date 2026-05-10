@@ -49,7 +49,15 @@ const {
   publicRoom,
   leaveSpectator,
 } = require("../api/controllers/room.controller");
-const { MAX_SPECTATORS } = require("../utils/constants");
+const {
+  MAX_SPECTATORS,
+  MAINTENANCE_BYPASS_USER_IDS,
+} = require("../utils/constants");
+
+function isMaintenanceActive(appSettings, userId) {
+  if (!appSettings.maintenanceMode) return false;
+  return !MAINTENANCE_BYPASS_USER_IDS.has(String(userId || ""));
+}
 const {
   cancelGracePeriod,
   isPlayerInGracePeriod,
@@ -272,7 +280,7 @@ module.exports = (server) => {
       try {
         // Check maintenance mode
         const appSettings = await AppSettings.getSettings();
-        if (appSettings.maintenanceMode) {
+        if (isMaintenanceActive(appSettings, host)) {
           socket.emit("maintenanceMode", {
             message: appSettings.maintenanceMessage,
           });
@@ -337,7 +345,7 @@ module.exports = (server) => {
         // Check maintenance mode (allow reconnects to pass through)
         if (!alreadyInRoom) {
           const appSettings = await AppSettings.getSettings();
-          if (appSettings.maintenanceMode) {
+          if (isMaintenanceActive(appSettings, player)) {
             socket.emit("maintenanceMode", {
               message: appSettings.maintenanceMessage,
             });
@@ -553,7 +561,7 @@ module.exports = (server) => {
         }
 
         const appSettings = await AppSettings.getSettings();
-        if (appSettings.maintenanceMode) {
+        if (isMaintenanceActive(appSettings, userId)) {
           socket.emit("maintenanceMode", {
             message: appSettings.maintenanceMessage,
           });
@@ -635,7 +643,7 @@ module.exports = (server) => {
     socket.on("quickPlay", async (playerId) => {
       try {
         const appSettings = await AppSettings.getSettings();
-        if (appSettings.maintenanceMode) {
+        if (isMaintenanceActive(appSettings, playerId)) {
           socket.emit("maintenanceMode", {
             message: appSettings.maintenanceMessage,
           });

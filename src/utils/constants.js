@@ -24,3 +24,8 @@ exports.QUICK_PLAY_DISCUSSION_TIME = 180; // 3 minutes in seconds
 
 // Spectators
 exports.MAX_SPECTATORS = 20;
+
+// Player IDs allowed to bypass maintenance mode (admin/dev accounts).
+exports.MAINTENANCE_BYPASS_USER_IDS = new Set([
+  "69c9ab1a6631e3885a13ed49",
+]);

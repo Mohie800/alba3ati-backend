@@ -1,16 +1,21 @@
 const AppSettings = require("../models/appSettings.model");
+const { MAINTENANCE_BYPASS_USER_IDS } = require("../utils/constants");
 
 // Public: called by the mobile app on startup
 exports.checkUpdate = async (req, res) => {
   try {
-    const { version } = req.query;
+    const { version, userId } = req.query;
     const settings = await AppSettings.getSettings();
 
     const communityLinks = settings.communityLinks || {};
 
+    const maintenanceMode =
+      settings.maintenanceMode &&
+      !MAINTENANCE_BYPASS_USER_IDS.has(String(userId || ""));
+
     const response = {
       forceUpdate: false,
-      maintenanceMode: settings.maintenanceMode,
+      maintenanceMode,
       maintenanceMessage: settings.maintenanceMessage,
       communityLinks,
     };
