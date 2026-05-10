@@ -1,5 +1,5 @@
 const AppSettings = require("../models/appSettings.model");
-const { MAINTENANCE_BYPASS_USER_IDS } = require("../utils/constants");
+const { MAINTENANCE_BYPASS_USER_IDS } = require("../../utils/constants");
 
 // Public: called by the mobile app on startup
 exports.checkUpdate = async (req, res) => {
