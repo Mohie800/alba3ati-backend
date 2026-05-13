@@ -61,6 +61,8 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 exports.getPlayers = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -71,10 +73,11 @@ exports.getPlayers = async (req, res) => {
 
     let query = {};
     if (search) {
+      const safe = escapeRegex(search);
       if (searchBy === "deviceId") {
-        query = { deviceId: { $regex: search, $options: "i" } };
+        query = { deviceId: { $regex: safe, $options: "i" } };
       } else {
-        query = { name: { $regex: search, $options: "i" } };
+        query = { name: { $regex: safe, $options: "i" } };
       }
     }
 
@@ -180,10 +183,14 @@ const ShopItem = require("../models/shopItem.model");
 
 exports.updatePlayerFrame = async (req, res) => {
   try {
-    const { frame } = req.body;
-    if (frame !== null && frame !== undefined) {
+    // Treat null, undefined, and empty string as "remove frame"
+    const raw = req.body.frame;
+    const frame = typeof raw === "string" && raw.trim() ? raw.trim() : null;
+
+    if (frame) {
       const validItem = await ShopItem.findOne({
         itemId: frame,
+        type: "frame",
         isActive: true,
       });
       if (!validItem) {
@@ -192,25 +199,14 @@ exports.updatePlayerFrame = async (req, res) => {
           .json({ success: false, message: "Invalid frame ID" });
       }
     }
-    // Check ownership if setting a frame (null = removing frame, always allowed)
-    if (frame) {
-      const user = await User.findById(req.params.id).select("ownedFrames");
-      if (!user) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Player not found" });
-      }
-      if (!user.ownedFrames.includes(frame)) {
-        return res
-          .status(403)
-          .json({ success: false, message: "Frame not owned" });
-      }
-    }
-    const player = await User.findByIdAndUpdate(
-      req.params.id,
-      { frame: frame || null },
-      { new: true },
-    );
+    // Admin assignment doubles as a gift: grant the frame if the player
+    // doesn't already own it, then equip it in one update.
+    const update = frame
+      ? { $set: { frame }, $addToSet: { ownedFrames: frame } }
+      : { $set: { frame: null } };
+    const player = await User.findByIdAndUpdate(req.params.id, update, {
+      new: true,
+    });
     if (!player) {
       return res
         .status(404)
