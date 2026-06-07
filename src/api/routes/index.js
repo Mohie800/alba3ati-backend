@@ -14,5 +14,6 @@ router.use("/leaderboard", require("./leaderboard.route"));
 router.use("/friends", require("./friends.routes"));
 router.use("/coins", require("./coins.route"));
 router.use("/shop", require("./shop.route"));
+router.use("/roles", require("./roles.route"));
 
 module.exports = router;

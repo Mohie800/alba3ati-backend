@@ -33,6 +33,9 @@ module.exports = {
   jwtSecret: process.env.JWT_SECRET,
   livekitApiKey: process.env.LIVEKIT_API_KEY,
   livekitApiSecret: process.env.LIVEKIT_API_SECRET,
+  // HTTP(S) URL of the LiveKit server, used by the server SDK's
+  // RoomServiceClient (admin voice monitoring). Clients connect over wss://.
+  livekitUrl: process.env.LIVEKIT_URL || "https://livekit.mohyeldeen.dev",
   googleClientId: process.env.GOOGLE_CLIENT_ID,
   googleClientIds: parseGoogleClientIds(),
 };

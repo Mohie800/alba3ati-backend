@@ -10,6 +10,9 @@ exports.ROLES = [
   { id: "9", name: "وَد الزلط", color: "#90EE90" },
 ];
 
+// Core roles that every game requires — these can never be locked/sold.
+exports.MANDATORY_ROLE_IDS = ["1", "2"];
+
 exports.ROUND_TIME = 70;
 exports.DIS_DUE = 10;
 exports.VOTE_TIME = 30;

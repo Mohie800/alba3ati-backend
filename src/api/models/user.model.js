@@ -12,6 +12,7 @@ const userSchema = new mongoose.Schema({
   coins: { type: Number, default: 0 },
   ownedFrames: [{ type: String }],
   ownedNameColors: [{ type: String }],
+  ownedRoles: [{ type: String }], // roleIds of locked roles the user has unlocked
   expoPushToken: { type: String, default: null },
   notificationPreferences: {
     publicRooms: { type: Boolean, default: true },

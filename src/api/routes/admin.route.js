@@ -12,6 +12,8 @@ const adController = require("../controllers/ad.controller");
 const dailyStatsController = require("../controllers/dailyStats.controller");
 const friendshipAdminController = require("../controllers/friendship.admin.controller");
 const shopAdminController = require("../controllers/shop.admin.controller");
+const rolesAdminController = require("../controllers/roles.admin.controller");
+const livekitAdminController = require("../controllers/livekit.admin.controller");
 const upload = require("../middleware/upload");
 
 // Public
@@ -29,6 +31,11 @@ router.patch(
   "/players/:id/frame",
   adminAuth,
   statsController.updatePlayerFrame,
+);
+router.patch(
+  "/players/:id/email",
+  adminAuth,
+  statsController.updatePlayerEmail,
 );
 router.get("/games", adminAuth, statsController.getGames);
 router.get("/games/:id", adminAuth, statsController.getGameDetail);
@@ -105,6 +112,10 @@ router.post("/shop-items", adminAuth, shopAdminController.createShopItem);
 router.put("/shop-items/:id", adminAuth, shopAdminController.updateShopItem);
 router.delete("/shop-items/:id", adminAuth, shopAdminController.deleteShopItem);
 
+// Roles (admin) — lock/price configuration for game roles
+router.get("/roles", adminAuth, rolesAdminController.getRoles);
+router.put("/roles/:roleId", adminAuth, rolesAdminController.updateRole);
+
 // Player Coins (admin)
 router.get("/players/:id/coins", adminAuth, shopAdminController.getPlayerCoins);
 router.post(
@@ -119,5 +130,9 @@ router.get(
   adminAuth,
   statsController.getPlayerNameHistory,
 );
+
+// Voice Monitor (admin) — live LiveKit rooms + listen-only moderator tokens
+router.get("/voice/rooms", adminAuth, livekitAdminController.getActiveRooms);
+router.get("/voice/token", adminAuth, livekitAdminController.getVoiceToken);
 
 module.exports = router;

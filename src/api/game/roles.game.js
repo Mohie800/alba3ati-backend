@@ -1,5 +1,7 @@
-const { ROUND_TIME } = require("../../utils/constants");
+const { ROUND_TIME, MANDATORY_ROLE_IDS } = require("../../utils/constants");
 const Room = require("../models/room.model");
+const RoleConfig = require("../models/roleConfig.model");
+const User = require("../models/user.model");
 const { claculateResult } = require("./calculate.game");
 const { startTimer } = require("./timer.game");
 exports.assignRoles = async (
@@ -10,6 +12,36 @@ exports.assignRoles = async (
   try {
     const room = await Room.findOne({ roomId }).populate("players.player");
     if (!room) return;
+
+    // Only the host configures the role distribution.
+    if (socket.playerId && room.host && socket.playerId !== room.host) return;
+
+    // Locked-role gate: a locked role may only be put into play if the HOST
+    // owns it. Mandatory core roles are always allowed. Once allowed, the role
+    // can be assigned to any player. Rooms with no locked roles skip this.
+    const lockedCfgs = await RoleConfig.find({ locked: true }).select("roleId");
+    if (lockedCfgs.length) {
+      const lockedSet = new Set(lockedCfgs.map((c) => c.roleId));
+      const selectedLocked = Object.entries(distribution || {})
+        .filter(
+          ([rid, count]) =>
+            count > 0 &&
+            lockedSet.has(rid) &&
+            !MANDATORY_ROLE_IDS.includes(rid)
+        )
+        .map(([rid]) => rid);
+      if (selectedLocked.length) {
+        const hostUser = await User.findById(room.host).select("ownedRoles");
+        const owned = new Set(hostUser?.ownedRoles || []);
+        const missing = selectedLocked.filter((rid) => !owned.has(rid));
+        if (missing.length) {
+          socket.emit("assignmentError", {
+            message: "لا تملك أحد الأدوار المقفلة المختارة",
+          });
+          return;
+        }
+      }
+    }
 
     room.discussionTime = discussionTime * 60;
     room.votesVisible = votesVisible;

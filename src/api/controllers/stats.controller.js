@@ -74,10 +74,13 @@ exports.getPlayers = async (req, res) => {
     let query = {};
     if (search) {
       const safe = escapeRegex(search);
-      if (searchBy === "deviceId") {
-        query = { deviceId: { $regex: safe, $options: "i" } };
+      const rx = { $regex: safe, $options: "i" };
+      if (searchBy === "name" || searchBy === "email" || searchBy === "deviceId") {
+        // Explicit single-field search (kept for backward compatibility).
+        query = { [searchBy]: rx };
       } else {
-        query = { name: { $regex: safe, $options: "i" } };
+        // Unified search: match name, email, or device ID in one input.
+        query = { $or: [{ name: rx }, { email: rx }, { deviceId: rx }] };
       }
     }
 
@@ -213,6 +216,49 @@ exports.updatePlayerFrame = async (req, res) => {
         .json({ success: false, message: "Player not found" });
     }
     res.json({ success: true, data: { frame: player.frame } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.updatePlayerEmail = async (req, res) => {
+  try {
+    // Treat null, undefined, and empty string as "remove the linked email".
+    const raw = req.body.email;
+    const email =
+      typeof raw === "string" && raw.trim() ? raw.trim().toLowerCase() : null;
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid email address" });
+    }
+
+    // $unset (not $set: null) so the sparse unique index ignores accounts
+    // with no email instead of treating multiple nulls as a collision.
+    const update = email ? { $set: { email } } : { $unset: { email: 1 } };
+
+    let player;
+    try {
+      player = await User.findByIdAndUpdate(req.params.id, update, {
+        new: true,
+        runValidators: true,
+      });
+    } catch (err) {
+      if (err.code === 11000) {
+        return res
+          .status(409)
+          .json({ success: false, message: "Email already in use" });
+      }
+      throw err;
+    }
+
+    if (!player) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Player not found" });
+    }
+    res.json({ success: true, data: { email: player.email ?? null } });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
   }

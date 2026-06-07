@@ -11,7 +11,7 @@ const coinTransactionSchema = new mongoose.Schema({
   balance: { type: Number, required: true },
   type: {
     type: String,
-    enum: ["game_complete", "game_win", "ad_reward", "shop_purchase", "admin_adjust"],
+    enum: ["game_complete", "game_win", "ad_reward", "shop_purchase", "role_purchase", "admin_adjust"],
     required: true,
   },
   meta: { type: mongoose.Schema.Types.Mixed, default: null },
