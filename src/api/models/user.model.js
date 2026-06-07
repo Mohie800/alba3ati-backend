@@ -9,9 +9,13 @@ const userSchema = new mongoose.Schema({
   deviceId: { type: String, default: null },
   frame: { type: String, default: null }, // Avatar frame ID (e.g. "wreath", "wings1")
   nameColor: { type: String, default: null }, // itemId of equipped name color (e.g. "crimson")
+  // itemId of the equipped shop profile picture. Distinct from `profilePicture`
+  // above, which holds the Google account photo URL for google-auth users.
+  equippedProfilePicture: { type: String, default: null },
   coins: { type: Number, default: 0 },
   ownedFrames: [{ type: String }],
   ownedNameColors: [{ type: String }],
+  ownedProfilePictures: [{ type: String }], // itemIds of profile pictures the user owns
   ownedRoles: [{ type: String }], // roleIds of locked roles the user has unlocked
   expoPushToken: { type: String, default: null },
   notificationPreferences: {

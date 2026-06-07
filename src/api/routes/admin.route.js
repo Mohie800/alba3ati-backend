@@ -75,12 +75,17 @@ router.get(
 );
 
 // Ads
-router.post("/ads", adminAuth, upload.single("image"), adController.createAd);
+router.post(
+  "/ads",
+  adminAuth,
+  upload.adImage.single("image"),
+  adController.createAd,
+);
 router.get("/ads", adminAuth, adController.getAds);
 router.put(
   "/ads/:id",
   adminAuth,
-  upload.single("image"),
+  upload.adImage.single("image"),
   adController.updateAd,
 );
 router.delete("/ads/:id", adminAuth, adController.deleteAd);
@@ -106,10 +111,21 @@ router.get(
   friendshipAdminController.getFriendshipStats,
 );
 
-// Shop Items (admin)
+// Shop Items (admin) — profilePicture items send multipart/form-data with an
+// "image" file; frame/nameColor items send JSON (multer passes those through).
 router.get("/shop-items", adminAuth, shopAdminController.getShopItems);
-router.post("/shop-items", adminAuth, shopAdminController.createShopItem);
-router.put("/shop-items/:id", adminAuth, shopAdminController.updateShopItem);
+router.post(
+  "/shop-items",
+  adminAuth,
+  upload.shopItemImage.single("image"),
+  shopAdminController.createShopItem,
+);
+router.put(
+  "/shop-items/:id",
+  adminAuth,
+  upload.shopItemImage.single("image"),
+  shopAdminController.updateShopItem,
+);
 router.delete("/shop-items/:id", adminAuth, shopAdminController.deleteShopItem);
 
 // Roles (admin) — lock/price configuration for game roles

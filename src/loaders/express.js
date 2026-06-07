@@ -30,8 +30,15 @@ module.exports = (app) => {
     }),
   );
 
-  // Serve uploaded files
-  app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+  // Serve uploaded files. Upload filenames are unique per file, so contents at a
+  // given URL never change — cache aggressively for fast repeat loads on mobile.
+  app.use(
+    "/uploads",
+    express.static(path.join(process.cwd(), "uploads"), {
+      maxAge: "30d",
+      immutable: true,
+    }),
+  );
 
   // Health check endpoint
   app.get("/health", (req, res) => res.sendStatus(200));

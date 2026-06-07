@@ -27,8 +27,8 @@ async function sendRequest(userId, targetUserId) {
 
   // Check both users exist
   const [user, target] = await Promise.all([
-    User.findById(userId).select("name frame nameColor stats friendCount"),
-    User.findById(targetUserId).select("name frame nameColor stats friendCount notificationPreferences expoPushToken"),
+    User.findById(userId).select("name frame nameColor equippedProfilePicture stats friendCount"),
+    User.findById(targetUserId).select("name frame nameColor equippedProfilePicture stats friendCount notificationPreferences expoPushToken"),
   ]);
   if (!user || !target) {
     throw Object.assign(new Error("المستخدم غير موجود"), { status: 404 });
@@ -80,6 +80,7 @@ async function sendRequest(userId, targetUserId) {
             name: user.name,
             frame: user.frame,
             nameColor: user.nameColor,
+            equippedProfilePicture: user.equippedProfilePicture || null,
             stats: user.stats,
             presence,
           },
@@ -103,6 +104,7 @@ async function sendRequest(userId, targetUserId) {
         name: user.name,
         frame: user.frame,
         nameColor: user.nameColor,
+        equippedProfilePicture: user.equippedProfilePicture || null,
         stats: user.stats,
       },
     });
@@ -151,7 +153,7 @@ async function acceptRequest(userId, requesterId) {
 
   // Notify requester
   if (emitToUser) {
-    const accepter = await User.findById(userId).select("name frame nameColor stats");
+    const accepter = await User.findById(userId).select("name frame nameColor equippedProfilePicture stats");
     const presence = getPresence(userId);
     emitToUser(requesterId, "friendRequestAccepted", {
       friend: {
@@ -159,6 +161,7 @@ async function acceptRequest(userId, requesterId) {
         name: accepter.name,
         frame: accepter.frame,
         nameColor: accepter.nameColor,
+        equippedProfilePicture: accepter.equippedProfilePicture || null,
         stats: accepter.stats,
         presence,
       },
@@ -373,7 +376,7 @@ async function getBlockedUsers(userId, page = 1, limit = 20) {
 
   const [blocks, total] = await Promise.all([
     Friendship.find(filter)
-      .populate("recipient", "name frame nameColor")
+      .populate("recipient", "name frame nameColor equippedProfilePicture")
       .sort({ updatedAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -384,7 +387,13 @@ async function getBlockedUsers(userId, page = 1, limit = 20) {
   const blocked = blocks
     .map((b) => b.recipient)
     .filter(Boolean)
-    .map((u) => ({ _id: u._id, name: u.name, frame: u.frame, nameColor: u.nameColor || null }));
+    .map((u) => ({
+      _id: u._id,
+      name: u.name,
+      frame: u.frame,
+      nameColor: u.nameColor || null,
+      equippedProfilePicture: u.equippedProfilePicture || null,
+    }));
 
   return { blocked, total, page, limit };
 }
@@ -402,8 +411,8 @@ async function getFriends(userId, page = 1, limit = 20) {
   const [friendships, total] = await Promise.all([
     Friendship.find(filter)
       .populate([
-        { path: "requester", select: "name frame nameColor stats" },
-        { path: "recipient", select: "name frame nameColor stats" },
+        { path: "requester", select: "name frame nameColor equippedProfilePicture stats" },
+        { path: "recipient", select: "name frame nameColor equippedProfilePicture stats" },
       ])
       .skip(skip)
       .limit(limit)
@@ -419,6 +428,7 @@ async function getFriends(userId, page = 1, limit = 20) {
       name: friend.name,
       frame: friend.frame,
       nameColor: friend.nameColor || null,
+      equippedProfilePicture: friend.equippedProfilePicture || null,
       stats: friend.stats,
       presence: getPresence(friend._id.toString()),
     };
@@ -446,7 +456,7 @@ async function getIncomingRequests(userId, page = 1, limit = 20) {
     recipient: userId,
     status: "pending",
   })
-    .populate("requester", "name frame nameColor stats")
+    .populate("requester", "name frame nameColor equippedProfilePicture stats")
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
@@ -469,7 +479,7 @@ async function getOutgoingRequests(userId, page = 1, limit = 20) {
     requester: userId,
     status: "pending",
   })
-    .populate("recipient", "name frame nameColor stats")
+    .populate("recipient", "name frame nameColor equippedProfilePicture stats")
     .sort({ createdAt: -1 })
     .skip(skip)
     .limit(limit)
@@ -542,7 +552,7 @@ async function searchPlayers(userId, query, page = 1, limit = 15) {
     const targetId = query.trim();
     if (targetId === userId) return [];
     const user = await User.findById(targetId)
-      .select("name frame nameColor stats")
+      .select("name frame nameColor equippedProfilePicture stats")
       .lean();
     users = user ? [user] : [];
   } else {
@@ -550,7 +560,7 @@ async function searchPlayers(userId, query, page = 1, limit = 15) {
       { _id: { $ne: userId }, $text: { $search: query } },
       { score: { $meta: "textScore" } },
     )
-      .select("name frame nameColor stats")
+      .select("name frame nameColor equippedProfilePicture stats")
       .sort({ score: { $meta: "textScore" } })
       .skip(skip)
       .limit(limit)
@@ -567,6 +577,7 @@ async function searchPlayers(userId, query, page = 1, limit = 15) {
     name: u.name,
     frame: u.frame,
     nameColor: u.nameColor || null,
+    equippedProfilePicture: u.equippedProfilePicture || null,
     stats: { gamesWon: u.stats?.gamesWon, gamesPlayed: u.stats?.gamesPlayed },
     friendshipStatus: statuses[u._id.toString()] || "none",
   }));

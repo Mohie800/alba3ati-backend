@@ -68,7 +68,7 @@ exports.getPlayers = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const search = req.query.search || "";
-    const searchBy = req.query.searchBy || "name";
+    const searchBy = req.query.searchBy || "";
     const skip = (page - 1) * limit;
 
     let query = {};

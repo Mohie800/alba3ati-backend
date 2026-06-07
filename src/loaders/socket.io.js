@@ -685,9 +685,17 @@ module.exports = (server) => {
           return;
         }
 
-        const sender = await User.findById(playerId).select("name frame nameColor");
+        const sender = await User.findById(playerId).select(
+          "name frame nameColor equippedProfilePicture",
+        );
         emitToUser(friendId, "friendInvite", {
-          from: { _id: playerId, name: sender?.name, nameColor: sender?.nameColor || null },
+          from: {
+            _id: playerId,
+            name: sender?.name,
+            frame: sender?.frame || null,
+            nameColor: sender?.nameColor || null,
+            equippedProfilePicture: sender?.equippedProfilePicture || null,
+          },
           roomId,
         });
       } catch (err) {

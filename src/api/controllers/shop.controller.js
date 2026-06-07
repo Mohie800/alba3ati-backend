@@ -16,7 +16,7 @@ exports.getItems = async (req, res) => {
 exports.getOwned = async (req, res) => {
   try {
     const user = await User.findById(req.params.userId).select(
-      "ownedFrames frame ownedNameColors nameColor",
+      "ownedFrames frame ownedNameColors nameColor ownedProfilePictures equippedProfilePicture",
     );
     if (!user) {
       return res
@@ -30,6 +30,8 @@ exports.getOwned = async (req, res) => {
         equippedFrame: user.frame || null,
         ownedNameColors: user.ownedNameColors || [],
         equippedNameColor: user.nameColor || null,
+        ownedProfilePictures: user.ownedProfilePictures || [],
+        equippedProfilePicture: user.equippedProfilePicture || null,
       },
     });
   } catch (err) {
@@ -53,8 +55,13 @@ exports.purchase = async (req, res) => {
         .json({ success: false, message: "Item not found" });
     }
 
-    const isNameColor = item.type === "nameColor";
-    const ownedField = isNameColor ? "ownedNameColors" : "ownedFrames";
+    // Map item type → the user array that tracks ownership of that cosmetic.
+    const OWNED_FIELD = {
+      nameColor: "ownedNameColors",
+      profilePicture: "ownedProfilePictures",
+      frame: "ownedFrames",
+    };
+    const ownedField = OWNED_FIELD[item.type] || "ownedFrames";
 
     // Atomic purchase: check balance >= price AND item not already owned
     const result = await User.findOneAndUpdate(
@@ -69,7 +76,9 @@ exports.purchase = async (req, res) => {
 
     if (!result) {
       // Determine the specific error
-      const user = await User.findById(userId).select("coins ownedFrames ownedNameColors");
+      const user = await User.findById(userId).select(
+        "coins ownedFrames ownedNameColors ownedProfilePictures",
+      );
       if (!user) {
         return res
           .status(404)
@@ -83,29 +92,26 @@ exports.purchase = async (req, res) => {
         .json({ success: false, error: "insufficient_coins" });
     }
 
+    const META = {
+      nameColor: { nameColorId: itemId, price: item.price },
+      profilePicture: { profilePictureId: itemId, price: item.price },
+      frame: { frameId: itemId, price: item.price },
+    };
     await CoinTransaction.create({
       user: userId,
       amount: -item.price,
       balance: result.coins,
       type: "shop_purchase",
-      meta: isNameColor
-        ? { nameColorId: itemId, price: item.price }
-        : { frameId: itemId, price: item.price },
+      meta: META[item.type] || META.frame,
     });
 
     const response = {
       success: true,
       newBalance: result.coins,
     };
-    if (isNameColor) {
-      response.ownedNameColors = result.ownedNameColors;
-    } else {
-      response.ownedFrames = result.ownedFrames;
-    }
+    response[ownedField] = result[ownedField];
     console.info(
-      isNameColor
-        ? `[Shop] Name color purchased: user=${userId} color=${itemId} price=${item.price}`
-        : `[Shop] Frame purchased: user=${userId} frame=${itemId} price=${item.price}`,
+      `[Shop] Purchased: user=${userId} type=${item.type} item=${itemId} price=${item.price}`,
     );
     res.json(response);
   } catch (err) {
@@ -164,6 +170,45 @@ exports.equip = async (req, res) => {
     await user.save();
 
     res.json({ success: true, equippedFrame: frame });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.equipProfilePicture = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { profilePicture } = req.body; // string itemId, or null to unequip
+
+    if (profilePicture !== null && typeof profilePicture !== "string") {
+      return res.status(400).json({
+        success: false,
+        error: "profilePicture must be string or null",
+      });
+    }
+
+    const user = await User.findById(userId).select(
+      "ownedProfilePictures equippedProfilePicture",
+    );
+    if (!user) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+
+    if (
+      profilePicture !== null &&
+      !(user.ownedProfilePictures || []).includes(profilePicture)
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Profile picture not owned" });
+    }
+
+    user.equippedProfilePicture = profilePicture;
+    await user.save();
+    console.info(
+      `[Shop] Profile picture equipped: user=${userId} pic=${profilePicture}`,
+    );
+    res.json({ success: true, equippedProfilePicture: profilePicture });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
   }
