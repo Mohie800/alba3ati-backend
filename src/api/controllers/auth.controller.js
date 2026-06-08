@@ -242,10 +242,11 @@ exports.googleRegister = async (req, res) => {
     }
 
     const payload = await verifyGoogleToken(idToken);
+    const email = payload.email ? payload.email.trim().toLowerCase() : null;
 
     // Check if Google account is already linked
     const existingUser = await User.findOne({
-      $or: [{ googleId: payload.googleId }, { email: payload.email }],
+      $or: [{ googleId: payload.googleId }, ...(email ? [{ email }] : [])],
     });
     if (existingUser) {
       return res.status(409).json({
@@ -277,7 +278,7 @@ exports.googleRegister = async (req, res) => {
 
     const user = await User.create({
       name: payload.name,
-      email: payload.email,
+      email: email || undefined,
       googleId: payload.googleId,
       profilePicture: payload.picture,
       authProvider: "google",
@@ -321,8 +322,27 @@ exports.googleLogin = async (req, res) => {
     }
 
     const payload = await verifyGoogleToken(idToken);
+    const email = payload.email ? payload.email.trim().toLowerCase() : null;
 
-    const user = await User.findOne({ googleId: payload.googleId });
+    let user = await User.findOne({ googleId: payload.googleId });
+
+    // Fall back to matching by verified email. This handles the case where an
+    // admin set/changed the account's email (or the user signs in from a Google
+    // account whose googleId isn't stored yet): if Google has verified that the
+    // user owns an email matching the stored one, adopt this Google identity
+    // onto that account so they can sign in. A verified email belongs to exactly
+    // one Google account, so this can't let a different person take over.
+    let adopted = false;
+    if (!user && email && payload.emailVerified) {
+      user = await User.findOne({ email });
+      if (user) {
+        user.googleId = payload.googleId;
+        if (payload.picture) user.profilePicture = payload.picture;
+        user.authProvider = "google";
+        adopted = true;
+      }
+    }
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -335,7 +355,22 @@ exports.googleLogin = async (req, res) => {
     const normalizedDeviceId = normalizeDeviceId(deviceId);
     if (normalizedDeviceId) {
       user.deviceId = normalizedDeviceId;
-      await user.save();
+    }
+
+    if (adopted || normalizedDeviceId) {
+      try {
+        await user.save();
+      } catch (err) {
+        if (err.code === 11000) {
+          // The googleId we tried to adopt is already linked to another user.
+          return res.status(409).json({
+            success: false,
+            code: "ALREADY_LINKED",
+            error: "هذا الحساب مرتبط بحساب آخر",
+          });
+        }
+        throw err;
+      }
     }
 
     // Check device ban
@@ -386,10 +421,11 @@ exports.linkGoogle = async (req, res) => {
     }
 
     const payload = await verifyGoogleToken(idToken);
+    const email = payload.email ? payload.email.trim().toLowerCase() : null;
 
     // Check if Google account is already linked to another user
     const existingUser = await User.findOne({
-      $or: [{ googleId: payload.googleId }, { email: payload.email }],
+      $or: [{ googleId: payload.googleId }, ...(email ? [{ email }] : [])],
       _id: { $ne: userId },
     });
     if (existingUser) {
@@ -415,7 +451,7 @@ exports.linkGoogle = async (req, res) => {
 
     // Link Google account in-place (preserves _id, stats, everything)
     user.googleId = payload.googleId;
-    user.email = payload.email;
+    user.email = email;
     user.profilePicture = payload.picture;
     user.authProvider = "google";
     await user.save();

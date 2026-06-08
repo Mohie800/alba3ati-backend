@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema({
   name: { type: String },
-  email: { type: String, unique: true, sparse: true },
+  email: { type: String, unique: true, sparse: true, lowercase: true, trim: true },
   googleId: { type: String, unique: true, sparse: true },
   authProvider: { type: String, enum: ["guest", "google"], default: "guest" },
   profilePicture: { type: String, default: null },
