@@ -1,6 +1,8 @@
 const Report = require("../models/report.model");
 const User = require("../models/user.model");
 const BannedDevice = require("../models/bannedDevice.model");
+const Notification = require("../models/notification.model");
+const { sendPushNotification } = require("../services/pushNotification.service");
 
 exports.submitReport = async (req, res) => {
   try {
@@ -88,10 +90,18 @@ exports.getReportDetail = async (req, res) => {
 
 exports.resolveReport = async (req, res) => {
   try {
-    const { action, adminNote } = req.body;
+    const { action, adminNote, expiresAt } = req.body;
 
     if (!action || !["dismissed", "warned", "banned"].includes(action)) {
       return res.status(400).json({ success: false, message: "Invalid action" });
+    }
+
+    // Validate expiresAt only when present (used by temporary blocks)
+    if (expiresAt && isNaN(Date.parse(expiresAt))) {
+      return res.status(400).json({ success: false, message: "Invalid expiresAt date" });
+    }
+    if (expiresAt && new Date(expiresAt) <= new Date()) {
+      return res.status(400).json({ success: false, message: "expiresAt must be in the future" });
     }
 
     const report = await Report.findById(req.params.id);
@@ -103,18 +113,61 @@ exports.resolveReport = async (req, res) => {
       return res.status(400).json({ success: false, message: "Report already resolved" });
     }
 
-    // If banning, look up the reported player's deviceId and create a ban
+    // WARN: notify the reported player (push + in-app record)
+    if (action === "warned") {
+      const title = "تحذير من الإدارة";
+      const body =
+        adminNote && adminNote.trim()
+          ? adminNote.trim()
+          : "تلقيت تحذيراً من إدارة اللعبة بسبب مخالفة. يرجى الالتزام بقواعد اللعب.";
+      const data = { type: "warning", reportId: report._id.toString() };
+
+      // Fire-and-forget — must not block or fail the resolve response.
+      sendPushNotification({
+        title,
+        body,
+        data,
+        userIds: [report.reportedPlayer.toString()],
+        type: "targeted",
+        sentBy: req.admin.id,
+      })
+        .then(async (notification) => {
+          // sendPushNotification returns null (and creates NO record) when the
+          // player has no valid Expo token. Create the record anyway so the warn
+          // is always visible in the app's notifications screen.
+          if (!notification) {
+            await Notification.create({
+              title,
+              body,
+              data,
+              type: "targeted",
+              recipients: [report.reportedPlayer],
+              recipientCount: 1,
+              sentBy: req.admin.id,
+            });
+          }
+        })
+        .catch((err) => console.error("Warn notification error:", err));
+    }
+
+    // BAN / TEMP-BLOCK: create or refresh a device ban (optionally time-limited)
     if (action === "banned") {
       const reportedUser = await User.findById(report.reportedPlayer);
       if (reportedUser && reportedUser.deviceId) {
-        const existing = await BannedDevice.findOne({ deviceId: reportedUser.deviceId });
-        if (!existing) {
-          await BannedDevice.create({
-            deviceId: reportedUser.deviceId,
-            reason: adminNote || `Banned via report: ${report.reason}`,
-            bannedBy: req.admin.id,
-          });
-        }
+        // Normalize to match ban enforcement (socket.io + auth use trim().toLowerCase())
+        const normalizedId = reportedUser.deviceId.trim().toLowerCase();
+        await BannedDevice.findOneAndUpdate(
+          { deviceId: normalizedId },
+          {
+            $set: {
+              deviceId: normalizedId,
+              reason: adminNote || `Banned via report: ${report.reason}`,
+              bannedBy: req.admin.id,
+              expiresAt: expiresAt ? new Date(expiresAt) : null,
+            },
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
       }
     }
 
