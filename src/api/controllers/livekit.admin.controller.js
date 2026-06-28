@@ -59,10 +59,13 @@ exports.getActiveRooms = async (req, res) => {
       }),
     );
 
-    // Join with game state in one query.
+    // Join with game state in one query. Populate player names so the admin
+    // monitor can show each player's role and alive/dead status (the roster),
+    // not just the voice participants.
     const roomIds = lkRooms.map((r) => r.name.slice(ROOM_PREFIX.length));
     const gameRooms = await Room.find({ roomId: { $in: roomIds } })
       .select("roomId host status gamePhase players")
+      .populate("players.player", "name")
       .lean();
     const gameById = {};
     gameRooms.forEach((g) => {
@@ -88,6 +91,20 @@ exports.getActiveRooms = async (req, res) => {
           };
         });
 
+      // The game roster from Mongo — the authoritative list of who is in the
+      // game with their role and alive/dead status (includes players who have
+      // already left voice, e.g. after being killed).
+      const players =
+        game && game.players
+          ? game.players.map((p) => ({
+              userId: p.player && p.player._id ? p.player._id.toString() : null,
+              name: (p.player && p.player.name) || "Unknown",
+              roleId: p.roleId || null,
+              status: p.status,
+              kills: p.kills || 0,
+            }))
+          : [];
+
       return {
         roomId,
         livekitRoom: room.name,
@@ -96,8 +113,9 @@ exports.getActiveRooms = async (req, res) => {
         status: game ? game.status : null,
         gamePhase: game ? game.gamePhase : null,
         host: game ? game.host : null,
-        playerCount: game && game.players ? game.players.length : 0,
+        playerCount: players.length,
         participants: people,
+        players,
       };
     });
 

@@ -10,9 +10,24 @@ const { claculateResult } = require("./calculate.game");
 const {
   ROUND_TIME,
   QUICK_PLAY_DISCUSSION_TIME,
+  QUICK_PLAY_MIN_PLAYERS,
 } = require("../../utils/constants");
 
 const REMATCH_TIMEOUT = 30; // seconds
+
+// Dev account that can start games below the minimum (mirrors startGame).
+const DEV_HOST_ID = "69c9ab1a6631e3885a13ed49";
+
+/**
+ * Whether `count` players is enough to (re)start a game in this room.
+ * Mirrors the guards used on a fresh start: quick play needs
+ * QUICK_PLAY_MIN_PLAYERS, regular rooms need >4 (the dev host can bypass).
+ */
+const hasEnoughPlayers = (room, count) => {
+  if (room.isQuickPlay) return count >= QUICK_PLAY_MIN_PLAYERS;
+  if (room.host?.toString() === DEV_HOST_ID) return true;
+  return count > 4;
+};
 
 // In-memory: roomId -> { timerId, tickId, startTime }
 const rematchTimers = new Map();
@@ -138,7 +153,7 @@ const beginRematch = async (io, socket, { roomId }) => {
       connectedIds.has(id),
     );
 
-    if (eligibleIds.length < 2) {
+    if (!hasEnoughPlayers(room, eligibleIds.length)) {
       socket.emit("rematchError", { message: "عدد اللاعبين غير كافي" });
       return;
     }
@@ -181,7 +196,7 @@ const rematchTimeout = async (io, roomId) => {
       connectedIds.has(id),
     );
 
-    if (eligibleIds.length >= 2) {
+    if (hasEnoughPlayers(room, eligibleIds.length)) {
       // Auto-begin with accepted + connected players
       room.players = room.players.filter((p) =>
         eligibleIds.includes(p.player._id.toString()),
