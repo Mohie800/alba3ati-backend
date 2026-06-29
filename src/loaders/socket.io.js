@@ -71,6 +71,7 @@ const { findOrCreateQuickPlayRoom } = require("../api/game/quickPlay.game");
 const {
   startRematch,
   acceptRematch,
+  joinRematch,
   beginRematch,
   getRematchRemainingTime,
 } = require("../api/game/rematch.game");
@@ -887,6 +888,17 @@ module.exports = (server) => {
       "rematchBegin",
       playerOnly((arg) => beginRematch(io, socket, arg)),
     );
+    // Spectators opt into the rematch and become players — must NOT use
+    // playerOnly (that early-returns for spectators). Still rate-limited.
+    socket.on("rematchJoin", async (arg) => {
+      if (!consumeActionToken(socket.id)) return;
+      const joinedUserId = await joinRematch(io, socket, arg);
+      if (joinedUserId) {
+        // Spectator -> player: now "playing" so friends see them in a room.
+        presenceService.setPlaying(joinedUserId, arg?.roomId);
+        notifyFriendsPresence(joinedUserId);
+      }
+    });
     //............................................................
   });
 

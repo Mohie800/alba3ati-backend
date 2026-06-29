@@ -119,6 +119,71 @@ const acceptRematch = async (io, socket, { roomId }) => {
 };
 
 /**
+ * Spectator opts into the rematch and becomes a player.
+ *
+ * Converts the caller from a spectator (lives in `room.spectators`, listen-only)
+ * into a real player (in `room.players`) who auto-accepts the rematch. Once in
+ * `room.players` + `rematchAccepted` with a live socket, the existing
+ * begin/timeout logic includes them with no further changes.
+ *
+ * Returns the joined userId on success (so the socket layer can update presence),
+ * otherwise undefined.
+ */
+const joinRematch = async (io, socket, { roomId }) => {
+  try {
+    if (socket.gameRoomId !== roomId) return;
+
+    const userId = socket.playerId; // spectators have playerId set
+    if (!userId || !socket.isSpectator) return;
+
+    const room = await Room.findOne({ roomId }).populate("players.player");
+    if (!room || room.gamePhase !== "rematch") return;
+
+    // Already a player? nothing to do.
+    if (room.players.some((p) => p.player._id.toString() === userId)) return;
+
+    // Capacity guard — mirrors the joinRoom cap (socket.io.js).
+    if (room.players.length >= 20) {
+      socket.emit("rematchError", { message: "الغرفة ممتلئة" });
+      return;
+    }
+
+    // Convert: pull from spectators, push to players, auto-accept.
+    room.spectators = room.spectators.filter(
+      (s) => s.user?.toString() !== userId,
+    );
+    room.players.push({ player: userId });
+    if (!room.rematchAccepted.includes(userId)) {
+      room.rematchAccepted.push(userId);
+    }
+    await room.save();
+
+    // Flip the socket out of read-only spectator mode.
+    socket.isSpectator = false;
+
+    const updated = await Room.findOne({ roomId }).populate("players.player");
+
+    // Everyone refreshes the player list + accepted list + spectator count.
+    io.to(roomId).emit("rematchUpdate", {
+      acceptedIds: updated.rematchAccepted,
+      room: updated,
+    });
+    io.to(roomId).emit("spectatorCountChanged", {
+      roomId,
+      count: updated.spectators?.length || 0,
+    });
+
+    // Tell the joiner specifically to flip out of spectator mode (the client
+    // uses this to re-request a LiveKit token with publish rights).
+    socket.emit("rematchJoined", { room: updated });
+
+    return userId;
+  } catch (error) {
+    console.error("[Rematch] Error joining rematch:", error);
+  }
+};
+
+/**
  * Get connected player IDs in a socket room.
  */
 const getConnectedPlayerIds = (io, roomId) => {
@@ -337,6 +402,7 @@ const getRematchRemainingTime = (roomId) => {
 module.exports = {
   startRematch,
   acceptRematch,
+  joinRematch,
   beginRematch,
   clearRematchTimer,
   getRematchRemainingTime,
