@@ -31,7 +31,10 @@ const {
   wadAlzalatAction,
 } = require("../api/game/room.actions");
 const { voteSubmit, voteSkip } = require("../api/game/votes.game");
-const { skipDiscussionVote } = require("../api/game/skipDiscussion.game");
+const {
+  skipDiscussionVote,
+  getSkipState,
+} = require("../api/game/skipDiscussion.game");
 const {
   mutePlayerToggle,
   getMutedPlayers,
@@ -432,6 +435,7 @@ module.exports = (server) => {
               rematchTimer: getRematchRemainingTime(roomId),
               mutedPlayerIds: getMutedPlayers(roomId),
               declarations: getRoleDeclarations(roomId),
+              skipState: getSkipState(updatedRoom),
             });
           } else {
             socket.emit("roomJoined", updatedRoom);
@@ -627,6 +631,7 @@ module.exports = (server) => {
           rematchTimer: getRematchRemainingTime(roomId),
           mutedPlayerIds: getMutedPlayers(roomId),
           declarations: getRoleDeclarations(roomId),
+          skipState: getSkipState(updatedRoom),
           isSpectator: true,
         });
 
@@ -779,11 +784,23 @@ module.exports = (server) => {
     // Wraps a game-action listener so spectators (read-only sockets) cannot
     // submit votes, mute, declare roles, accept rematches, etc. Also enforces
     // a per-socket rate limit so vote/action events can't be flooded.
-    const playerOnly = (handler) => (arg) => {
-      if (socket.isSpectator) return;
-      if (!consumeActionToken(socket.id)) return;
-      return handler(arg);
-    };
+    const playerOnly =
+      (handler) =>
+      (arg, ack) => {
+        // Handlers that use acks receive the callback as Socket.IO's last arg.
+        // Reject early-returns with a failure ack so an optimistic client can
+        // reconcile instead of hanging until its timeout fires.
+        if (socket.isSpectator) {
+          if (typeof ack === "function") ack({ ok: false, reason: "spectator" });
+          return;
+        }
+        if (!consumeActionToken(socket.id)) {
+          if (typeof ack === "function")
+            ack({ ok: false, reason: "rate_limited" });
+          return;
+        }
+        return handler(arg, ack);
+      };
 
     //start the game (do not allow players to join)
     socket.on("startGame", async (arg) => {
@@ -865,7 +882,7 @@ module.exports = (server) => {
     socket.on("skipVote", playerOnly((arg) => voteSkip(io, socket, arg)));
     socket.on(
       "skipDiscussion",
-      playerOnly((arg) => skipDiscussionVote(io, socket, arg)),
+      playerOnly((arg, ack) => skipDiscussionVote(io, socket, arg, ack)),
     );
     socket.on(
       "mutePlayer",
