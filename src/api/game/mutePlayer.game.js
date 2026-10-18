@@ -1,55 +1,45 @@
 const Room = require("../models/room.model");
+const { pidOf } = require("./roomUtils");
+const { withRoomLock } = require("./roomLock");
 
-// In-memory store of muted player IDs per room
-const mutedPlayers = new Map(); // roomId -> Set of playerIds
+// Muted player ids live on the room (`mutedPlayers`) so they survive a restart.
+exports.mutePlayerToggle = (io, socket, { roomId, targetId } = {}) => {
+  if (!roomId || !targetId) return;
+  return withRoomLock(roomId, async () => {
+    try {
+      const room = await Room.findOne({ roomId }, "players host gamePhase mutedPlayers");
+      if (!room) return;
 
-exports.mutePlayerToggle = async (io, socket, { roomId, targetId }) => {
-  try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
-    if (!room) return;
+      // Only the host can mute players
+      if (socket.playerId !== room.host) return;
 
-    // Only the host can mute players
-    if (socket.playerId !== room.host) return;
+      // Only during discussion phase
+      if (room.gamePhase !== "discussion") return;
 
-    // Only during discussion phase
-    if (room.gamePhase !== "discussion") return;
+      // Cannot mute yourself
+      if (targetId === room.host) return;
 
-    // Cannot mute yourself
-    if (targetId === room.host) return;
+      // Target must be alive in the room
+      const target = room.players.find(
+        (p) => pidOf(p) === targetId && p.status === "alive",
+      );
+      if (!target) return;
 
-    // Target must be alive in the room
-    const target = room.players.find(
-      (p) => p.player._id.toString() === targetId && p.status === "alive",
-    );
-    if (!target) return;
+      const isMuted = room.mutedPlayers.includes(targetId);
+      room.mutedPlayers = isMuted
+        ? room.mutedPlayers.filter((id) => id !== targetId)
+        : [...room.mutedPlayers, targetId];
+      await room.save();
 
-    if (!mutedPlayers.has(roomId)) {
-      mutedPlayers.set(roomId, new Set());
+      io.to(roomId).emit("playerMuted", {
+        targetId,
+        isMuted: !isMuted,
+        mutedPlayerIds: [...room.mutedPlayers],
+      });
+    } catch (error) {
+      console.error("mutePlayer error:", error);
     }
-
-    const muted = mutedPlayers.get(roomId);
-    const isMuted = muted.has(targetId);
-
-    if (isMuted) {
-      muted.delete(targetId);
-    } else {
-      muted.add(targetId);
-    }
-
-    io.to(roomId).emit("playerMuted", {
-      targetId,
-      isMuted: !isMuted,
-      mutedPlayerIds: Array.from(muted),
-    });
-  } catch (error) {
-    console.error("mutePlayer error:", error);
-  }
+  });
 };
 
-exports.clearMutedPlayers = (roomId) => {
-  mutedPlayers.delete(roomId);
-};
-
-exports.getMutedPlayers = (roomId) => {
-  return mutedPlayers.has(roomId) ? Array.from(mutedPlayers.get(roomId)) : [];
-};
+exports.getMutedPlayers = (room) => [...(room.mutedPlayers || [])];

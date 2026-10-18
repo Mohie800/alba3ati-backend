@@ -10,7 +10,7 @@ async function recordGameEnd(room, gameResult) {
     const date = getToday();
 
     // Collect unique player IDs from this game
-    const playerIds = room.players.map((p) =>
+    const playerIds = room.players.filter((p) => p.player).map((p) =>
       typeof p.player === "object" && p.player._id ? p.player._id : p.player
     );
 

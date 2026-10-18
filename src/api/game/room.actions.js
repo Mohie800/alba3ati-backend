@@ -1,12 +1,16 @@
-const { ROLES } = require("../../utils/constants");
-const { getActiveRooms } = require("../controllers/room.controller");
 const Room = require("../models/room.model");
 const { claculateResult } = require("./calculate.game");
+const { withRoomLock } = require("./roomLock");
+const { PLAYER_POPULATE, pidOf } = require("./roomUtils");
+const { broadcastRoomsUpdate } = require("./roomsList");
+const { setPhase } = require("./timer.game");
 
 exports.startGame = async (io, socket, { roomId }) => {
   try {
     const room = await Room.findOne({ roomId });
     if (!room) return;
+    // A repeated start (double tap) must not reset a game already running.
+    if (room.status !== "waiting") return;
     if (
       room.players.length <= 4 &&
       room.host.toString() !== "69c9ab1a6631e3885a13ed49"
@@ -15,10 +19,9 @@ exports.startGame = async (io, socket, { roomId }) => {
       return;
     }
     room.status = "playing";
-    room.gamePhase = "roleSetup";
+    setPhase(room, "roleSetup");
     await room.save();
-    const rooms = await getActiveRooms();
-    io.emit("roomsUpdate", rooms);
+    broadcastRoomsUpdate(io);
     io.to(roomId).emit("gameStarted");
   } catch (error) {
     console.log(error);
@@ -26,24 +29,26 @@ exports.startGame = async (io, socket, { roomId }) => {
   }
 };
 
-const resoveAction = async (roomId, io, socket) => {
-  const room = await Room.findOne({ roomId }).populate("players.player");
-  if (!room) return;
-  const notDone = room.players.find(
+// `updated` is the room returned by the action's atomic update.
+const resoveAction = async (roomId, io, socket, updated) => {
+  await updated.populate(PLAYER_POPULATE);
+  const notDone = updated.players.find(
     (p) => p.playStatus === "playing" && p.status === "alive",
   );
+  io.to(roomId).emit("playerDone", updated);
   if (!notDone) {
-    io.to(roomId).emit("playerDone", room);
-    claculateResult(io, roomId);
+    await claculateResult(io, roomId);
   } else {
-    io.to(roomId).emit("playerDone", room);
     socket.emit("waitRoom");
   }
 };
 
-// Query helper: $elemMatch ensures all conditions match the SAME array element
+// Query helper: $elemMatch ensures all conditions match the SAME array element.
+// Actions are only accepted during the night of a running game.
 const playerElemMatch = (roomId, playerId) => ({
   roomId,
+  status: "playing",
+  gamePhase: "night",
   players: {
     $elemMatch: { player: playerId, playStatus: "playing", status: "alive" },
   },
@@ -51,7 +56,7 @@ const playerElemMatch = (roomId, playerId) => ({
 
 exports.al3omdaAction = async (io, socket, { roomId, targetId, playerId }) => {
   try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room) return;
 
     // Cannot protect the same player two nights in a row (per al3omda)
@@ -68,7 +73,7 @@ exports.al3omdaAction = async (io, socket, { roomId, targetId, playerId }) => {
 
     // Validate target is alive and in the room
     const targetPlayer = room.players.find(
-      (p) => p.player._id.toString() === targetId,
+      (p) => pidOf(p) === targetId,
     );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
@@ -83,7 +88,7 @@ exports.al3omdaAction = async (io, socket, { roomId, targetId, playerId }) => {
     );
     if (!updated) return;
 
-    await resoveAction(roomId, io, socket);
+    await resoveAction(roomId, io, socket, updated);
     return null;
   } catch (error) {
     console.log(error);
@@ -93,12 +98,12 @@ exports.al3omdaAction = async (io, socket, { roomId, targetId, playerId }) => {
 
 exports.ba3atiAction = async (io, socket, { roomId, targetId, playerId }) => {
   try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room) return;
 
     // Validate target is alive and in the room
     const targetPlayer = room.players.find(
-      (p) => p.player._id.toString() === targetId,
+      (p) => pidOf(p) === targetId,
     );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
@@ -113,7 +118,7 @@ exports.ba3atiAction = async (io, socket, { roomId, targetId, playerId }) => {
     );
     if (!updated) return;
 
-    await resoveAction(roomId, io, socket);
+    await resoveAction(roomId, io, socket, updated);
     return;
   } catch (error) {
     console.log(error);
@@ -122,7 +127,7 @@ exports.ba3atiAction = async (io, socket, { roomId, targetId, playerId }) => {
 };
 exports.damazeenAction = async (io, socket, { roomId, targetId, playerId }) => {
   try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room) return;
 
     // Damazeen can only attack once per game
@@ -133,7 +138,7 @@ exports.damazeenAction = async (io, socket, { roomId, targetId, playerId }) => {
 
     // Validate target is alive and in the room
     const targetPlayer = room.players.find(
-      (p) => p.player._id.toString() === targetId,
+      (p) => pidOf(p) === targetId,
     );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
@@ -151,7 +156,7 @@ exports.damazeenAction = async (io, socket, { roomId, targetId, playerId }) => {
     );
     if (!updated) return;
 
-    await resoveAction(roomId, io, socket);
+    await resoveAction(roomId, io, socket, updated);
     return;
   } catch (error) {
     console.log(error);
@@ -160,7 +165,7 @@ exports.damazeenAction = async (io, socket, { roomId, targetId, playerId }) => {
 };
 exports.damazeenProtection = async (io, socket, { roomId, playerId }) => {
   try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room) return;
 
     // Damazeen can only protect once per game
@@ -180,7 +185,7 @@ exports.damazeenProtection = async (io, socket, { roomId, playerId }) => {
     );
     if (!updated) return;
 
-    await resoveAction(roomId, io, socket);
+    await resoveAction(roomId, io, socket, updated);
     return;
   } catch (error) {
     console.log(error);
@@ -193,21 +198,14 @@ exports.sitAlwada3Action = async (
   { roomId, targetId, playerId },
 ) => {
   try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room) return;
 
     // Validate target is alive and in the room
     const targetPlayer = room.players.find(
-      (p) => p.player._id.toString() === targetId,
+      (p) => pidOf(p) === targetId,
     );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
-
-    // Privately reveal the target's role to the requesting socket
-    socket.emit("sitAlwada3Reveal", {
-      targetId,
-      targetName: targetPlayer.player.name,
-      roleId: targetPlayer.roleId,
-    });
 
     // Atomically update player status and push target
     const updated = await Room.findOneAndUpdate(
@@ -220,7 +218,14 @@ exports.sitAlwada3Action = async (
     );
     if (!updated) return;
 
-    await resoveAction(roomId, io, socket);
+    // Privately reveal the target's role, only once the action was accepted
+    socket.emit("sitAlwada3Reveal", {
+      targetId,
+      targetName: targetPlayer.player.name,
+      roleId: targetPlayer.roleId,
+    });
+
+    await resoveAction(roomId, io, socket, updated);
     return;
   } catch (error) {
     console.log(error);
@@ -233,12 +238,12 @@ exports.abuJanzeerAction = async (
   { roomId, targetId, playerId },
 ) => {
   try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room) return;
 
     // Validate target is alive and in the room
     const targetPlayer = room.players.find(
-      (p) => p.player._id.toString() === targetId,
+      (p) => pidOf(p) === targetId,
     );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
@@ -253,7 +258,7 @@ exports.abuJanzeerAction = async (
     );
     if (!updated) return;
 
-    await resoveAction(roomId, io, socket);
+    await resoveAction(roomId, io, socket, updated);
     return;
   } catch (error) {
     console.log(error);
@@ -262,7 +267,7 @@ exports.abuJanzeerAction = async (
 };
 exports.ballahAction = async (io, socket, { roomId, targetId, playerId }) => {
   try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room) return;
 
     // Ballah can only kill once per game
@@ -273,7 +278,7 @@ exports.ballahAction = async (io, socket, { roomId, targetId, playerId }) => {
 
     // Validate target is alive and in the room
     const targetPlayer = room.players.find(
-      (p) => p.player._id.toString() === targetId,
+      (p) => pidOf(p) === targetId,
     );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
@@ -291,7 +296,7 @@ exports.ballahAction = async (io, socket, { roomId, targetId, playerId }) => {
     );
     if (!updated) return;
 
-    await resoveAction(roomId, io, socket);
+    await resoveAction(roomId, io, socket, updated);
     return;
   } catch (error) {
     console.log(error);
@@ -308,7 +313,7 @@ exports.skipNightAction = async (io, socket, { roomId, playerId }) => {
     );
     if (!updated) return;
 
-    await resoveAction(roomId, io, socket);
+    await resoveAction(roomId, io, socket, updated);
     return;
   } catch (error) {
     console.log(error);
@@ -321,12 +326,12 @@ exports.ba3atiKabeerAction = async (
   { roomId, targetId, playerId },
 ) => {
   try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room) return;
 
     // Validate target is alive and in the room
     const targetPlayer = room.players.find(
-      (p) => p.player._id.toString() === targetId,
+      (p) => pidOf(p) === targetId,
     );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
@@ -341,7 +346,7 @@ exports.ba3atiKabeerAction = async (
     );
     if (!updated) return;
 
-    await resoveAction(roomId, io, socket);
+    await resoveAction(roomId, io, socket, updated);
     return;
   } catch (error) {
     console.log(error);
@@ -354,7 +359,7 @@ exports.ba3atiKabeerConvert = async (
   { roomId, targetId, playerId },
 ) => {
   try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room) return;
 
     // Ba3ati Kabeer can only convert once per game
@@ -365,7 +370,7 @@ exports.ba3atiKabeerConvert = async (
 
     // Validate target is alive and in the room
     const targetPlayer = room.players.find(
-      (p) => p.player._id.toString() === targetId,
+      (p) => pidOf(p) === targetId,
     );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
@@ -391,7 +396,7 @@ exports.ba3atiKabeerConvert = async (
     );
     if (!updated) return;
 
-    await resoveAction(roomId, io, socket);
+    await resoveAction(roomId, io, socket, updated);
     return;
   } catch (error) {
     console.log(error);
@@ -405,16 +410,16 @@ exports.jenabuAction = async (
   { roomId, target1Id, target2Id, playerId },
 ) => {
   try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room) return;
 
     // Validate both targets are alive and different
     if (target1Id === target2Id) return;
     const target1Player = room.players.find(
-      (p) => p.player._id.toString() === target1Id,
+      (p) => pidOf(p) === target1Id,
     );
     const target2Player = room.players.find(
-      (p) => p.player._id.toString() === target2Id,
+      (p) => pidOf(p) === target2Id,
     );
     if (!target1Player || target1Player.status !== "alive") return;
     if (!target2Player || target2Player.status !== "alive") return;
@@ -427,15 +432,6 @@ exports.jenabuAction = async (
     };
     const sameTeam =
       getTeam(target1Player.roleId) === getTeam(target2Player.roleId);
-
-    // Privately reveal the result to the requesting socket
-    socket.emit("jenabuReveal", {
-      target1Id,
-      target1Name: target1Player.player.name,
-      target2Id,
-      target2Name: target2Player.player.name,
-      sameTeam,
-    });
 
     // Atomically update player status and push targets
     const updated = await Room.findOneAndUpdate(
@@ -454,7 +450,16 @@ exports.jenabuAction = async (
     );
     if (!updated) return;
 
-    await resoveAction(roomId, io, socket);
+    // Privately reveal the result, only once the action was accepted
+    socket.emit("jenabuReveal", {
+      target1Id,
+      target1Name: target1Player.player.name,
+      target2Id,
+      target2Name: target2Player.player.name,
+      sameTeam,
+    });
+
+    await resoveAction(roomId, io, socket, updated);
     return;
   } catch (error) {
     console.log(error);
@@ -467,7 +472,7 @@ exports.wadAlzalatAction = async (
   { roomId, targetId, playerId },
 ) => {
   try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room) return;
 
     // Wad Alzalat can only use water once per match
@@ -480,7 +485,7 @@ exports.wadAlzalatAction = async (
 
     // Validate target is alive and in the room
     const targetPlayer = room.players.find(
-      (p) => p.player._id.toString() === targetId,
+      (p) => pidOf(p) === targetId,
     );
     if (!targetPlayer || targetPlayer.status !== "alive") return;
 
@@ -498,10 +503,20 @@ exports.wadAlzalatAction = async (
     );
     if (!updated) return;
 
-    await resoveAction(roomId, io, socket);
+    await resoveAction(roomId, io, socket, updated);
     return;
   } catch (error) {
     console.log(error);
     return;
   }
 };
+
+// Every handler mutates the room, so each runs under the room lock.
+const locked = (fn) => (io, socket, arg) => {
+  const roomId = arg && arg.roomId;
+  if (!roomId) return;
+  return withRoomLock(roomId, () => fn(io, socket, arg));
+};
+for (const name of Object.keys(exports)) {
+  exports[name] = locked(exports[name]);
+}

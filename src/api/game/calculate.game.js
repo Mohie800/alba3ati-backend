@@ -1,16 +1,24 @@
 const Room = require("../models/room.model");
-const { nightResults } = require("./results.game");
-const { cancelTimer } = require("./timer.game");
+const { cancelTimer, setPhase, startPhaseTimer } = require("./timer.game");
+const { NIGHT_RESULTS_TIME } = require("../../utils/constants");
+const { PLAYER_POPULATE, pidOf } = require("./roomUtils");
+
+// Resolves the night. Runs under the room lock; the phase guard makes a second
+// trigger (timer expiry racing the last action) a no-op.
 module.exports.claculateResult = async (io, roomId) => {
   try {
-    // Fetch the room
-    const room = await Room.findOne({ roomId }).populate("players.player");
-    if (!room) return null;
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
+    if (!room || room.status !== "playing" || room.gamePhase !== "night") {
+      return null;
+    }
+    // Stop the night timer first so no stray tick reaches clients after
+    // "timeout" (a tick during nightResults flips the client to discussion).
+    cancelTimer(roomId);
 
     // Snapshot who is alive BEFORE kill resolution
     const wasAlive = {};
     room.players.forEach((p) => {
-      wasAlive[p.player._id.toString()] = p.status;
+      wasAlive[pidOf(p)] = p.status;
     });
 
     // Extract player IDs from ba3atiTargets and al3omdaTargets
@@ -23,7 +31,7 @@ module.exports.claculateResult = async (io, roomId) => {
     if (!room.damazeenProtection) {
       room.ba3atiKabeerConvertTargets.forEach((entry) => {
         const target = room.players.find(
-          (p) => p.player._id.toString() === entry.target,
+          (p) => pidOf(p) === entry.target,
         );
         if (!target || target.status === "dead") return;
         if (al3omdatargets.has(entry.target)) return;
@@ -37,9 +45,9 @@ module.exports.claculateResult = async (io, roomId) => {
       room.players.forEach((player) => {
         if (player.status === "dead") return;
         if (
-          ba3atiTargets.includes(player.player._id.toString()) &&
-          !ba3atiKabeerConvertSafeTargets.has(player.player._id.toString()) &&
-          !al3omdatargets.has(player.player._id.toString())
+          ba3atiTargets.includes(pidOf(player)) &&
+          !ba3atiKabeerConvertSafeTargets.has(pidOf(player)) &&
+          !al3omdatargets.has(pidOf(player))
         ) {
           player.status = "dead"; // Mark as dead
         }
@@ -50,7 +58,7 @@ module.exports.claculateResult = async (io, roomId) => {
     const damazeenTargets = room.damazeenTargets.map((t) => t.target);
     room.players.forEach((player) => {
       if (player.status === "dead") return;
-      if (damazeenTargets.includes(player.player._id.toString())) {
+      if (damazeenTargets.includes(pidOf(player))) {
         player.status = "dead"; // Mark as dead
       }
     });
@@ -63,9 +71,9 @@ module.exports.claculateResult = async (io, roomId) => {
       room.players.forEach((player) => {
         if (player.status === "dead") return;
         if (
-          ba3atiKabeerKillTargets.includes(player.player._id.toString()) &&
-          !ba3atiKabeerConvertSafeTargets.has(player.player._id.toString()) &&
-          !al3omdatargets.has(player.player._id.toString())
+          ba3atiKabeerKillTargets.includes(pidOf(player)) &&
+          !ba3atiKabeerConvertSafeTargets.has(pidOf(player)) &&
+          !al3omdatargets.has(pidOf(player))
         ) {
           player.status = "dead";
         }
@@ -75,21 +83,21 @@ module.exports.claculateResult = async (io, roomId) => {
     // Snapshot after ba3ati/damazeen/ba3atiKabeer kills, before ballah/abuJanzeer
     const beforeBallah = {};
     room.players.forEach((p) => {
-      beforeBallah[p.player._id.toString()] = p.status;
+      beforeBallah[pidOf(p)] = p.status;
     });
 
     // Ballah Abu Seif kills — unblockable (not affected by omda or damazeen protection)
     const ballahKills = [];
     room.ballahTargets.forEach((entry) => {
       const victim = room.players.find(
-        (p) => p.player._id.toString() === entry.target,
+        (p) => pidOf(p) === entry.target,
       );
       if (!victim) return;
 
       victim.status = "dead";
 
       const killer = room.players.find(
-        (p) => p.player._id.toString() === entry.player,
+        (p) => pidOf(p) === entry.player,
       );
       ballahKills.push({
         victimId: entry.target,
@@ -103,10 +111,10 @@ module.exports.claculateResult = async (io, roomId) => {
     const wadAlzalatResults = [];
     room.wadAlzalatTargets.forEach((entry) => {
       const target = room.players.find(
-        (p) => p.player._id.toString() === entry.target,
+        (p) => pidOf(p) === entry.target,
       );
       const wadPlayer = room.players.find(
-        (p) => p.player._id.toString() === entry.player,
+        (p) => pidOf(p) === entry.player,
       );
       if (!target || !wadPlayer) return;
 
@@ -141,7 +149,7 @@ module.exports.claculateResult = async (io, roomId) => {
       if (wasAlive[targetId] !== "alive") return;
       abuJanzeerDead.push(targetId);
       const player = room.players.find(
-        (p) => p.player._id.toString() === targetId,
+        (p) => pidOf(p) === targetId,
       );
       if (player && player.status === "alive") {
         player.status = "dead";
@@ -152,7 +160,7 @@ module.exports.claculateResult = async (io, roomId) => {
     const ba3atiKabeerConverted = [];
     room.ba3atiKabeerConvertTargets.forEach((entry) => {
       const target = room.players.find(
-        (p) => p.player._id.toString() === entry.target,
+        (p) => pidOf(p) === entry.target,
       );
       if (!target || target.status === "dead") return;
       // Blocked by al3omda protection and damazeen protection
@@ -171,10 +179,10 @@ module.exports.claculateResult = async (io, roomId) => {
     const newlyDead = room.players
       .filter(
         (p) =>
-          wasAlive[p.player._id.toString()] === "alive" &&
-          beforeBallah[p.player._id.toString()] === "dead",
+          wasAlive[pidOf(p)] === "alive" &&
+          beforeBallah[pidOf(p)] === "dead",
       )
-      .map((p) => p.player._id.toString());
+      .map((p) => pidOf(p));
 
     // Remember each al3omda's target this night (for next-round restriction)
     const newLastTargets = {};
@@ -187,7 +195,7 @@ module.exports.claculateResult = async (io, roomId) => {
     room.players.forEach((P) => {
       P.playStatus = "playing";
     });
-    room.gamePhase = "nightResults";
+    setPhase(room, "nightResults", NIGHT_RESULTS_TIME);
     await room.save();
     io.to(roomId).emit("timeout", {
       room,
@@ -197,9 +205,8 @@ module.exports.claculateResult = async (io, roomId) => {
       ba3atiKabeerConverted,
       wadAlzalatResults,
     });
-    cancelTimer(roomId);
     io.to(roomId).emit("stopTimer");
-    setTimeout(() => nightResults(io, roomId), 8000);
+    startPhaseTimer(io, room);
 
     return room; // Return the updated room
   } catch (error) {

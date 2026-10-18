@@ -273,6 +273,10 @@ exports.deletePlayer = async (req, res) => {
         .json({ success: false, message: "Player not found" });
     }
 
+    // Must run while the User doc still exists so their room entries match.
+    const { removeUserFromActiveRooms } = require("./room.controller");
+    await removeUserFromActiveRooms(req.app.get("io"), req.params.id);
+
     await Promise.all([
       User.findByIdAndDelete(req.params.id),
       Friendship.deleteMany({

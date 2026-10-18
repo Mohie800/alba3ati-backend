@@ -124,6 +124,10 @@ exports.deleteAccount = async (req, res) => {
         : f.requester.toString();
     });
 
+    // Must run while the User doc still exists so their room entries match.
+    const { removeUserFromActiveRooms } = require("./room.controller");
+    await removeUserFromActiveRooms(req.app.get("io"), userId);
+
     await Promise.all([
       // Delete user's contacts/messages
       Contact.deleteMany({ player: userId }),

@@ -26,7 +26,10 @@ async function updatePlayerStats(room, gameResult) {
     const bulkOps = [];
     const coinAmounts = new Map(); // playerId -> earned coins
 
-    for (const p of room.players) {
+    // Entries of deleted users populate to null; nothing to update for them.
+    const players = room.players.filter((p) => p.player);
+
+    for (const p of players) {
       const playerId =
         typeof p.player === "object" && p.player._id ? p.player._id : p.player;
       const outcome = didPlayerWin(p.roleId, gameResult);
@@ -66,14 +69,14 @@ async function updatePlayerStats(room, gameResult) {
     }
 
     // Handle win streaks separately (needs current values)
-    const playerIds = room.players.map((p) =>
+    const playerIds = players.map((p) =>
       typeof p.player === "object" && p.player._id ? p.player._id : p.player,
     );
     const users = await User.find({ _id: { $in: playerIds } });
     const userMap = new Map(users.map((u) => [u._id.toString(), u]));
 
     const streakOps = [];
-    for (const p of room.players) {
+    for (const p of players) {
       const playerId = (
         typeof p.player === "object" && p.player._id ? p.player._id : p.player
       ).toString();

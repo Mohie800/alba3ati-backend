@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { EventEmitter } = require("events");
 const RoomSchema = new mongoose.Schema(
   {
     roomId: { type: String, required: true, unique: true },
@@ -33,7 +34,13 @@ const RoomSchema = new mongoose.Schema(
     votesVisible: { type: Boolean, default: false },
     deadChat: { type: Boolean, default: false },
     gamePhase: { type: String, default: "lobby" },
+    // When the current timed phase ends; null for phases that wait on players.
+    phaseEndsAt: { type: Date, default: null },
     gameResult: { type: String, default: null },
+    // Discussion/phase state kept on the room so it survives a restart.
+    skipVotes: [{ type: String }],
+    mutedPlayers: [{ type: String }],
+    roleDeclarations: { type: Map, of: String, default: {} },
     publicRoomReadyNotifiedAt: { type: Date, default: null },
 
     //actions
@@ -86,4 +93,24 @@ RoomSchema.index({ status: 1, updatedAt: -1 });
 // roomId already has a unique index from `unique: true`, so it's not re-declared here.
 RoomSchema.index({ "players.player": 1, status: 1 });
 
+// Entries whose User was deleted populate to null; clients would crash on them.
+RoomSchema.set("toJSON", {
+  transform(doc, ret) {
+    if (Array.isArray(ret.players)) ret.players = ret.players.filter((p) => p.player);
+    return ret;
+  },
+});
+
+// Emits ("statusChanged", roomId, status) after any save that changes status.
+const roomEvents = new EventEmitter();
+RoomSchema.pre("save", function () {
+  this.$locals.statusChanged = this.isNew || this.isModified("status");
+});
+RoomSchema.post("save", function (doc) {
+  if (doc.$locals.statusChanged) {
+    roomEvents.emit("statusChanged", doc.roomId, doc.status);
+  }
+});
+
 module.exports = mongoose.model("Room", RoomSchema);
+module.exports.roomEvents = roomEvents;

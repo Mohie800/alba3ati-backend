@@ -3,17 +3,13 @@ const config = require("../config/config");
 
 const Room = require("../api/models/room.model");
 const User = require("../api/models/user.model");
-const GameRound = require("../api/models/gameRound.model");
 const BannedDevice = require("../api/models/bannedDevice.model");
 const {
   sendPushNotification,
 } = require("../api/services/pushNotification.service");
 const presenceService = require("../api/services/presence.service");
 const friendshipService = require("../api/services/friendship.service");
-const {
-  isBlockedBetween,
-  getBlockPartners,
-} = require("../api/services/friendship.service");
+const { getBlockPartners } = require("../api/services/friendship.service");
 const { assignRoles } = require("../api/game/roles.game");
 const {
   ba3atiAction,
@@ -41,26 +37,19 @@ const {
 } = require("../api/game/mutePlayer.game");
 const {
   handleDeclareRole,
-  clearRoleDeclarations,
   getRoleDeclarations,
 } = require("../api/game/declareRole.game");
-const { getRemainingTime } = require("../api/game/timer.game");
+const { getRemainingTime, timerPayload } = require("../api/game/timer.game");
 const {
-  getActiveRooms,
-  joinRoom,
   leaveRoom,
   publicRoom,
   leaveSpectator,
 } = require("../api/controllers/room.controller");
 const {
   MAX_SPECTATORS,
+  MAX_ROOM_PLAYERS,
   MAINTENANCE_BYPASS_USER_IDS,
 } = require("../utils/constants");
-
-function isMaintenanceActive(appSettings, userId) {
-  if (!appSettings.maintenanceMode) return false;
-  return !MAINTENANCE_BYPASS_USER_IDS.has(String(userId || ""));
-}
 const {
   cancelGracePeriod,
   isPlayerInGracePeriod,
@@ -70,7 +59,11 @@ const {
 } = require("../api/game/disconnect.game");
 const initChat = require("../api/services/chat.service");
 const AppSettings = require("../api/models/appSettings.model");
-const { findOrCreateQuickPlayRoom } = require("../api/game/quickPlay.game");
+const {
+  findOrCreateQuickPlayRoom,
+  evaluateCountdown,
+  getActiveQuickPlayRoomId,
+} = require("../api/game/quickPlay.game");
 const {
   startRematch,
   acceptRematch,
@@ -79,6 +72,15 @@ const {
   getRematchRemainingTime,
 } = require("../api/game/rematch.game");
 const { updatePeakConcurrent } = require("../api/game/dailyStats.game");
+const { withRoomLock } = require("../api/game/roomLock");
+const { PLAYER_POPULATE, pidOf, findPlayer } = require("../api/game/roomUtils");
+const { broadcastRoomsUpdate } = require("../api/game/roomsList");
+const { seatSocket, takeOverSeat } = require("../api/game/roomMembership");
+
+function isMaintenanceActive(appSettings, userId) {
+  if (!appSettings.maintenanceMode) return false;
+  return !MAINTENANCE_BYPASS_USER_IDS.has(String(userId || ""));
+}
 
 module.exports = (server) => {
   const io = SocketIO(server, {
@@ -124,38 +126,44 @@ module.exports = (server) => {
       .substring(2, 2 + length);
   }
 
-  // userId → Set of socketIds (for targeted events and presence)
-  const userSockets = new Map();
-
   function emitToUser(userId, event, data) {
-    const sockets = userSockets.get(userId.toString());
-    if (sockets) {
-      for (const socketId of sockets) {
-        io.to(socketId).emit(event, data);
-      }
+    for (const socketId of presenceService.getSocketIds(userId)) {
+      io.to(socketId).emit(event, data);
     }
   }
 
   // Inject emitToUser into friendship service so it can emit events on request/accept/etc.
   friendshipService.setEmitToUser(emitToUser);
 
+  /**
+   * Broadcast a presence change to the player's online friends.
+   */
+  async function notifyFriendsPresence(userId, presence) {
+    try {
+      const friendIds = await friendshipService.getFriendIds(userId);
+      for (const friendId of friendIds) {
+        if (presenceService.isOnline(friendId)) {
+          emitToUser(friendId, "friendPresenceUpdate", { userId, presence });
+        }
+      }
+    } catch (err) {
+      console.error("[Presence] notify friends error:", err.message);
+    }
+  }
+
+  // Presence is derived from sockets; friends hear only real changes.
+  presenceService.init(io, (userId, presence) => {
+    notifyFriendsPresence(userId, presence);
+  });
+  Room.roomEvents.on("statusChanged", (roomId, status) => {
+    presenceService.setRoomStatus(roomId, status);
+  });
+
   // Initialize chat namespace
   initChat(io);
 
-  // Clean up orphaned rooms from previous server runs
-  // (grace period timers are in-memory and lost on restart)
-  Room.updateMany(
-    { status: { $in: ["waiting", "playing"] } },
-    { $set: { status: "ended" } },
-  )
-    .exec()
-    .then((result) => {
-      if (result.modifiedCount > 0) {
-        console.log(
-          `[Cleanup] Ended ${result.modifiedCount} orphaned rooms from previous run`,
-        );
-      }
-    });
+  // Rooms from a previous run are resumed by recoverActiveRooms (app.js),
+  // which runs before the server accepts connections.
 
   // Sweep orphaned grace-period timers (safety net for room-end paths
   // that don't call clearAllGracePeriodsForRoom)
@@ -176,8 +184,7 @@ module.exports = (server) => {
         );
         if (result.modifiedCount > 0) {
           console.log(`[Cleanup] Ended ${result.modifiedCount} stale rooms`);
-          const rooms = await getActiveRooms();
-          io.emit("roomsUpdate", rooms);
+          broadcastRoomsUpdate(io);
         }
       } catch (err) {
         console.error("[Cleanup] Error cleaning stale rooms:", err);
@@ -185,58 +192,6 @@ module.exports = (server) => {
     },
     5 * 60 * 1000,
   );
-
-  // --- Presence helpers (shared across all connections) ---
-
-  /**
-   * Register a socket for a player. Cancels any pending offline debounce.
-   * Does NOT set presence state — callers decide (setOnline vs setPlaying).
-   */
-  function registerUserSocket(socket, playerId) {
-    const id = playerId?.toString();
-    if (!id) return;
-    if (!userSockets.has(id)) userSockets.set(id, new Set());
-    userSockets.get(id).add(socket.id);
-    presenceService.cancelPendingOffline(id);
-  }
-
-  /**
-   * Unregister a socket. When no sockets remain, schedules debounced offline.
-   */
-  function unregisterUserSocket(socket, playerId) {
-    const id = playerId?.toString();
-    if (!id) return;
-    const sockets = userSockets.get(id);
-    if (!sockets) return;
-    sockets.delete(socket.id);
-    if (sockets.size === 0) {
-      userSockets.delete(id);
-      presenceService.scheduleOffline(id, (uid) => {
-        notifyFriendsPresence(uid);
-      });
-    }
-  }
-
-  /**
-   * Broadcast presence update to a player's online friends.
-   */
-  async function notifyFriendsPresence(userId) {
-    try {
-      const id = userId.toString();
-      const friendIds = await friendshipService.getFriendIds(id);
-      const presence = presenceService.getPresence(id);
-      for (const friendId of friendIds) {
-        if (presenceService.isOnline(friendId)) {
-          emitToUser(friendId, "friendPresenceUpdate", {
-            userId: id,
-            presence,
-          });
-        }
-      }
-    } catch (err) {
-      console.error("[Presence] notify friends error:", err.message);
-    }
-  }
 
   // ---- Per-socket rate limiter for gameplay events ----
   // Sliding-1s window. Drops events silently above the limit so accidental
@@ -257,6 +212,138 @@ module.exports = (server) => {
     return true;
   }
 
+  // Leave whatever room this socket is seated in, the same way "home" does.
+  async function leaveCurrentRoom(socket) {
+    const roomId = socket.gameRoomId;
+    if (!roomId) return;
+    const wasSpectator = socket.isSpectator;
+    socket.gameRoomId = null;
+    socket.isSpectator = false;
+    presenceService.refreshSocket(socket);
+    if (wasSpectator) {
+      await leaveSpectator(io, socket, roomId, socket.playerId);
+    } else {
+      await leaveRoom(io, socket, roomId, socket.playerId, true);
+    }
+  }
+
+  // Player already in `room.players`: reconnect after a drop, rejoin after
+  // leaving (alive or dead), or a repeated join from the same socket.
+  async function rejoinSeat(socket, room, playerId) {
+    const roomId = room.roomId;
+    if (room.status === "ended") {
+      socket.emit("roomClosed", { reason: "gameEnded" });
+      return;
+    }
+
+    takeOverSeat(io, socket, roomId, playerId);
+    const wasInGrace = isPlayerInGracePeriod(playerId, roomId);
+    const wasInWaitingGrace = isPlayerInWaitingGracePeriod(playerId, roomId);
+    if (wasInGrace) cancelGracePeriod(io, roomId, playerId);
+    if (wasInWaitingGrace) cancelWaitingGracePeriod(roomId, playerId);
+
+    await seatSocket(io, socket, roomId, playerId);
+
+    if (room.status === "playing") {
+      // Mid-game rejoin: send gameReconnected so frontend restores game state
+      const me = findPlayer(room, playerId);
+      socket.emit("gameReconnected", {
+        room,
+        roleId: me ? me.roleId : null,
+        gamePhase: room.gamePhase || "night",
+        timer: getRemainingTime(roomId),
+        gameResult: room.gameResult || null,
+        rematchAccepted: room.rematchAccepted || [],
+        rematchTimer: getRematchRemainingTime(roomId),
+        mutedPlayerIds: getMutedPlayers(room),
+        declarations: getRoleDeclarations(room),
+        skipState: getSkipState(room),
+        ...timerPayload(room),
+      });
+    } else {
+      socket.emit("roomJoined", room);
+      if (wasInWaitingGrace && room.isPublic) broadcastRoomsUpdate(io);
+      if (wasInWaitingGrace && room.isQuickPlay) await evaluateCountdown(io, roomId);
+    }
+    io.to(roomId).emit("playerJoined", room);
+  }
+
+  async function handleJoinRoom(socket, roomId, playerId) {
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
+    if (!room) {
+      socket.emit("joinError", { message: "Room not found" });
+      return;
+    }
+
+    if (findPlayer(room, playerId)) {
+      await rejoinSeat(socket, room, playerId);
+      return;
+    }
+
+    // Block new players from joining a non-waiting room
+    if (room.status === "ended") {
+      socket.emit("joinError", { message: "Game has ended" });
+      return;
+    }
+    if (room.status !== "waiting") {
+      // Game in progress: don't reject — let the client offer spectate mode.
+      socket.emit("gameRunning", {
+        roomId,
+        playerCount: room.players.length,
+        phase: room.gamePhase || "playing",
+      });
+      return;
+    }
+
+    const appSettings = await AppSettings.getSettings();
+    if (isMaintenanceActive(appSettings, playerId)) {
+      socket.emit("maintenanceMode", {
+        message: appSettings.maintenanceMessage,
+      });
+      return;
+    }
+
+    // Block enforcement: refuse if joiner blocks (or is blocked by) anyone
+    // already in the room. Rejoins skip this so an existing player can
+    // always come back after a block was applied mid-game.
+    const partners = await getBlockPartners(playerId);
+    if (partners.size > 0 && room.players.some((p) => partners.has(pidOf(p)))) {
+      socket.emit("joinError", { message: "لا يمكنك الانضمام إلى هذه الغرفة" });
+      return;
+    }
+
+    if (room.players.length >= MAX_ROOM_PLAYERS) {
+      socket.emit("joinError", { message: "Room is full" });
+      return;
+    }
+
+    // Atomic: never adds the same player twice and never exceeds the cap,
+    // even against writers outside this lock.
+    const updatedRoom = await Room.findOneAndUpdate(
+      {
+        _id: room._id,
+        status: "waiting",
+        "players.player": { $ne: playerId },
+        [`players.${MAX_ROOM_PLAYERS - 1}`]: { $exists: false },
+      },
+      { $push: { players: { player: playerId } } },
+      { new: true },
+    ).populate(PLAYER_POPULATE);
+    if (!updatedRoom) {
+      socket.emit("joinError", { message: "Failed to join room" });
+      return;
+    }
+
+    await seatSocket(io, socket, roomId, playerId);
+
+    socket.emit("roomJoined", updatedRoom);
+    io.to(roomId).emit("playerJoined", updatedRoom);
+    if (updatedRoom.isPublic) broadcastRoomsUpdate(io);
+
+    // Re-evaluate quick play countdown when a new player joins
+    if (updatedRoom.isQuickPlay) await evaluateCountdown(io, roomId);
+  }
+
   // Connection handler
   io.on("connection", (socket) => {
     console.log("New client connected");
@@ -265,6 +352,7 @@ module.exports = (server) => {
     // Track which room this socket is in and who they are
     socket.gameRoomId = null;
     socket.playerId = null;
+    socket.isSpectator = false;
 
     // --- Per-socket presence queries (any player can check any profile) ---
     socket.on("getPlayerPresence", (userId, callback) => {
@@ -282,46 +370,34 @@ module.exports = (server) => {
     // Handle room creation
     socket.on("createRoom", async (host) => {
       try {
+        if (!host) return;
+        const hostId = String(host);
         // Check maintenance mode
         const appSettings = await AppSettings.getSettings();
-        if (isMaintenanceActive(appSettings, host)) {
+        if (isMaintenanceActive(appSettings, hostId)) {
           socket.emit("maintenanceMode", {
             message: appSettings.maintenanceMessage,
           });
           return;
         }
 
-        const roomId = getRandomString();
+        await leaveCurrentRoom(socket);
 
-        // Create a new room
+        const roomId = getRandomString();
         const room = await Room.create({
           roomId,
-          host,
-          players: [{ player: host }],
+          host: hostId,
+          players: [{ player: hostId }],
         });
 
-        await room.populate("players.player");
+        await withRoomLock(roomId, async () => {
+          await room.populate(PLAYER_POPULATE);
+          await seatSocket(io, socket, roomId, hostId);
 
-        // Join the room
-        joinRoom(io, socket, roomId);
-        socket.gameRoomId = roomId;
-        socket.playerId = host;
-
-        // Presence: register socket and set playing
-        registerUserSocket(socket, host);
-        presenceService.setPlaying(host, roomId);
-        notifyFriendsPresence(host);
-
-        // Notify the host
-        socket.emit("roomCreated", { room });
-
-        // Notify all clients in the room
-        io.to(roomId).emit("roomUpdated", { room });
-
-        // Update public rooms list without blocking the response
-        getActiveRooms()
-          .then((rooms) => io.emit("roomsUpdate", rooms))
-          .catch((err) => console.error("Error updating rooms list:", err));
+          // Notify the host
+          socket.emit("roomCreated", { room });
+          io.to(roomId).emit("roomUpdated", { room });
+        });
       } catch (error) {
         console.error("Error creating room:", error);
         socket.emit("error", { message: "Failed to create room" });
@@ -331,239 +407,33 @@ module.exports = (server) => {
     //public room
     socket.on("publicRoom", (arg) => publicRoom(io, socket, arg));
 
-    // Backend Socket.IO handlers
-    socket.on("joinRoom", async ({ roomId, player }) => {
+    socket.on("joinRoom", async (payload) => {
+      const { roomId, player } = payload || {};
+      if (!roomId || !player) {
+        socket.emit("joinError", { message: "Failed to join room" });
+        return;
+      }
       try {
-        const room = await Room.findOne({ roomId }).populate("players.player");
-
-        if (!room) {
-          socket.emit("joinError", { message: "Room not found" });
-          return;
+        if (socket.gameRoomId && socket.gameRoomId !== roomId) {
+          await leaveCurrentRoom(socket);
         }
-
-        // Check if player already exists in room (reconnect scenario)
-        const alreadyInRoom = room.players.some(
-          (p) => p.player._id.toString() === player,
+        await withRoomLock(roomId, () =>
+          handleJoinRoom(socket, roomId, String(player)),
         );
-
-        // Check maintenance mode (allow reconnects to pass through)
-        if (!alreadyInRoom) {
-          const appSettings = await AppSettings.getSettings();
-          if (isMaintenanceActive(appSettings, player)) {
-            socket.emit("maintenanceMode", {
-              message: appSettings.maintenanceMessage,
-            });
-            return;
-          }
-
-          // Block enforcement: refuse if joiner blocks (or is blocked by) anyone
-          // already in the room. Reconnects skip this so an existing player can
-          // always rejoin after a transient block was applied mid-game.
-          const partners = await getBlockPartners(player);
-          if (partners.size > 0) {
-            const blocked = room.players.some((p) =>
-              partners.has(p.player._id.toString()),
-            );
-            if (blocked) {
-              socket.emit("joinError", { message: "لا يمكنك الانضمام إلى هذه الغرفة" });
-              return;
-            }
-          }
-        }
-
-        let updatedRoom;
-        if (alreadyInRoom) {
-          // Room ended while player was away — kick them out
-          if (room.status === "ended") {
-            socket.emit("roomClosed", { reason: "gameEnded" });
-            return;
-          }
-
-          const wasInGrace = isPlayerInGracePeriod(player);
-          const wasInWaitingGrace = isPlayerInWaitingGracePeriod(player);
-
-          // Allow dead players who left mid-game to rejoin as spectators
-          const me = room.players.find(
-            (p) => p.player._id.toString() === player,
-          );
-          const isDeadSpectator =
-            room.status === "playing" &&
-            me &&
-            me.status === "dead" &&
-            me.leftMidGame;
-
-          // Block duplicate joins for players who are already connected in the room.
-          // Rejoin is only allowed when the player is in a disconnect grace period
-          // or when a dead player returns to spectate.
-          if (!wasInGrace && !wasInWaitingGrace && !isDeadSpectator) {
-            socket.emit("joinError", { message: "Already joined this room" });
-            return;
-          }
-
-          // Cancel grace periods if player was disconnected
-          if (wasInGrace) {
-            cancelGracePeriod(io, roomId, player);
-          }
-          if (wasInWaitingGrace) {
-            cancelWaitingGracePeriod(roomId, player);
-          }
-
-          // Rejoin socket room without adding duplicate player entry
-          updatedRoom = room;
-
-          joinRoom(io, socket, roomId);
-          socket.gameRoomId = roomId;
-          socket.playerId = player;
-
-          // Presence: register socket on reconnect
-          registerUserSocket(socket, player);
-          presenceService.setPlaying(player, roomId, room.status);
-          notifyFriendsPresence(player);
-
-          if (room.status === "playing") {
-            // Mid-game rejoin: send gameReconnected so frontend restores game state
-            const me = room.players.find(
-              (p) => p.player._id.toString() === player,
-            );
-            socket.emit("gameReconnected", {
-              room: updatedRoom,
-              roleId: me ? me.roleId : null,
-              gamePhase: updatedRoom.gamePhase || "night",
-              timer: getRemainingTime(roomId),
-              gameResult: updatedRoom.gameResult || null,
-              rematchAccepted: updatedRoom.rematchAccepted || [],
-              rematchTimer: getRematchRemainingTime(roomId),
-              mutedPlayerIds: getMutedPlayers(roomId),
-              declarations: getRoleDeclarations(roomId),
-              skipState: getSkipState(updatedRoom),
-            });
-          } else {
-            socket.emit("roomJoined", updatedRoom);
-            // Refresh public rooms list so the room reappears after reconnect
-            if (wasInWaitingGrace && updatedRoom.isPublic) {
-              const rooms = await getActiveRooms();
-              io.emit("roomsUpdate", rooms);
-            }
-            // Re-evaluate quick play countdown on reconnect
-            if (wasInWaitingGrace && updatedRoom.isQuickPlay) {
-              const {
-                evaluateCountdown,
-              } = require("../api/game/quickPlay.game");
-              evaluateCountdown(io, roomId);
-            }
-          }
-          io.to(roomId).emit("playerJoined", updatedRoom);
-        } else {
-          // Block new players from joining a non-waiting room
-          if (room.status === "ended") {
-            socket.emit("joinError", { message: "Game has ended" });
-            return;
-          }
-          if (room.status !== "waiting") {
-            // Game in progress: don't reject — let the client offer spectate mode.
-            socket.emit("gameRunning", {
-              roomId,
-              playerCount: room.players.length,
-              phase: room.gamePhase || "playing",
-            });
-            return;
-          }
-
-          if (room.players.length >= 20) {
-            socket.emit("joinError", { message: "Room is full" });
-            return;
-          }
-
-          updatedRoom = await Room.findByIdAndUpdate(
-            room._id,
-            { $push: { players: { player } } },
-            { new: true },
-          ).populate("players.player");
-
-          joinRoom(io, socket, roomId);
-          socket.gameRoomId = roomId;
-          socket.playerId = player;
-
-          // Presence: set playing and notify friends
-          registerUserSocket(socket, player);
-          presenceService.setPlaying(player, roomId);
-          notifyFriendsPresence(player);
-
-          socket.emit("roomJoined", updatedRoom);
-          io.to(roomId).emit("playerJoined", updatedRoom);
-
-          // Re-evaluate quick play countdown when a new player joins
-          if (updatedRoom.isQuickPlay) {
-            const { evaluateCountdown } = require("../api/game/quickPlay.game");
-            evaluateCountdown(io, roomId);
-          }
-
-          // if (
-          //   updatedRoom.isPublic &&
-          //   !updatedRoom.isQuickPlay &&
-          //   updatedRoom.status === "waiting" &&
-          //   updatedRoom.players.length === 3
-          // ) {
-          //   try {
-          //     const markedRoom = await Room.findOneAndUpdate(
-          //       {
-          //         _id: updatedRoom._id,
-          //         publicRoomReadyNotifiedAt: null,
-          //       },
-          //       { $set: { publicRoomReadyNotifiedAt: new Date() } },
-          //       { new: true },
-          //     );
-
-          //     if (markedRoom) {
-          //       const roomPlayerIds = updatedRoom.players
-          //         .map((p) => p.player?._id?.toString())
-          //         .filter(Boolean);
-
-          //       const recipients = await User.find({
-          //         _id: { $nin: roomPlayerIds },
-          //         expoPushToken: { $ne: null },
-          //         $or: [
-          //           {
-          //             "notificationPreferences.publicRooms": { $exists: false },
-          //           },
-          //           { "notificationPreferences.publicRooms": true },
-          //         ],
-          //       }).select("_id");
-
-          //       const recipientIds = recipients.map((u) => u._id.toString());
-
-          //       if (recipientIds.length > 0) {
-          //         await sendPushNotification({
-          //           title: "غرفة عامة جاهزة",
-          //           body: "تم الوصول إلى 3 لاعبين. انضم الآن!",
-          //           data: {
-          //             screen: "room",
-          //             roomId: updatedRoom.roomId,
-          //             playerCount: 3,
-          //             type: "public_room_ready",
-          //           },
-          //           userIds: recipientIds,
-          //           type: "targeted",
-          //         });
-          //       }
-          //     }
-          //   } catch (notifErr) {
-          //     console.error("Public room ready notification error:", notifErr);
-          //   }
-          // }
-        }
       } catch (error) {
+        console.error("[joinRoom] error:", error);
         socket.emit("joinError", { message: "Failed to join room" });
       }
     });
 
     // Spectate an in-progress room (read-only join)
-    socket.on("spectateRoom", async ({ roomId, userId }) => {
+    socket.on("spectateRoom", async ({ roomId, userId } = {}) => {
       try {
         if (!roomId || !userId) {
           socket.emit("spectateError", { code: "INVALID_REQUEST" });
           return;
         }
+        userId = String(userId);
 
         const appSettings = await AppSettings.getSettings();
         if (isMaintenanceActive(appSettings, userId)) {
@@ -573,71 +443,68 @@ module.exports = (server) => {
           return;
         }
 
-        const room = await Room.findOne({ roomId }).populate("players.player");
-        if (!room) {
-          socket.emit("spectateError", { code: "ROOM_NOT_FOUND" });
-          return;
-        }
-        if (room.status !== "playing") {
-          socket.emit("spectateError", { code: "ROOM_NOT_PLAYING" });
-          return;
+        if (socket.gameRoomId && socket.gameRoomId !== roomId) {
+          await leaveCurrentRoom(socket);
         }
 
-        // If user is already a player in this room, never put them in `spectators`.
-        // Tell the client to use the normal joinRoom flow (handles the dead-rejoin
-        // and grace-period reconnect paths).
-        const isPlayer = room.players.some(
-          (p) => p.player._id.toString() === userId,
-        );
-        if (isPlayer) {
-          socket.emit("spectateError", { code: "USER_IS_PLAYER" });
-          return;
-        }
+        await withRoomLock(roomId, async () => {
+          const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
+          if (!room) {
+            socket.emit("spectateError", { code: "ROOM_NOT_FOUND" });
+            return;
+          }
+          if (room.status !== "playing") {
+            socket.emit("spectateError", { code: "ROOM_NOT_PLAYING" });
+            return;
+          }
 
-        if ((room.spectators?.length || 0) >= MAX_SPECTATORS) {
-          socket.emit("spectateError", { code: "SPECTATORS_FULL" });
-          return;
-        }
+          // If user is already a player in this room, never put them in `spectators`.
+          // Tell the client to use the normal joinRoom flow (handles the dead-rejoin
+          // and grace-period reconnect paths).
+          if (findPlayer(room, userId)) {
+            socket.emit("spectateError", { code: "USER_IS_PLAYER" });
+            return;
+          }
 
-        // Add to spectators only if not already present — $addToSet is unsafe
-        // here because the joinedAt default produces a different subdocument on
-        // each cast, causing duplicates on every rejoin.
-        await Room.updateOne(
-          { roomId, "spectators.user": { $ne: userId } },
-          { $push: { spectators: { user: userId } } },
-        );
+          const alreadySpectating = (room.spectators || []).some(
+            (s) => s.user?.toString() === userId,
+          );
+          if (!alreadySpectating && (room.spectators?.length || 0) >= MAX_SPECTATORS) {
+            socket.emit("spectateError", { code: "SPECTATORS_FULL" });
+            return;
+          }
 
-        const updatedRoom = await Room.findOne({ roomId }).populate(
-          "players.player",
-        );
+          // Add to spectators only if not already present — $addToSet is unsafe
+          // here because the joinedAt default produces a different subdocument on
+          // each cast, causing duplicates on every rejoin.
+          const updatedRoom =
+            (await Room.findOneAndUpdate(
+              { roomId, "spectators.user": { $ne: userId } },
+              { $push: { spectators: { user: userId } } },
+              { new: true },
+            ).populate(PLAYER_POPULATE)) || room;
 
-        socket.join(roomId);
-        socket.gameRoomId = roomId;
-        socket.playerId = userId;
-        socket.isSpectator = true;
+          // Spectators count as "online", not "playing", in presence.
+          await seatSocket(io, socket, roomId, userId, { spectator: true });
 
-        registerUserSocket(socket, userId);
-        // Spectators are "online", not "playing" — friends-list shouldn't show
-        // them as in a room.
-        presenceService.setOnline(userId);
-        notifyFriendsPresence(userId);
+          socket.emit("spectatorJoined", {
+            room: updatedRoom,
+            gamePhase: updatedRoom.gamePhase || "night",
+            timer: getRemainingTime(roomId),
+            gameResult: updatedRoom.gameResult || null,
+            rematchAccepted: updatedRoom.rematchAccepted || [],
+            rematchTimer: getRematchRemainingTime(roomId),
+            mutedPlayerIds: getMutedPlayers(updatedRoom),
+            declarations: getRoleDeclarations(updatedRoom),
+            skipState: getSkipState(updatedRoom),
+            ...timerPayload(updatedRoom),
+            isSpectator: true,
+          });
 
-        socket.emit("spectatorJoined", {
-          room: updatedRoom,
-          gamePhase: updatedRoom.gamePhase || "night",
-          timer: getRemainingTime(roomId),
-          gameResult: updatedRoom.gameResult || null,
-          rematchAccepted: updatedRoom.rematchAccepted || [],
-          rematchTimer: getRematchRemainingTime(roomId),
-          mutedPlayerIds: getMutedPlayers(roomId),
-          declarations: getRoleDeclarations(roomId),
-          skipState: getSkipState(updatedRoom),
-          isSpectator: true,
-        });
-
-        io.to(roomId).emit("spectatorCountChanged", {
-          roomId,
-          count: updatedRoom.spectators?.length || 0,
+          io.to(roomId).emit("spectatorCountChanged", {
+            roomId,
+            count: updatedRoom.spectators?.length || 0,
+          });
         });
       } catch (err) {
         console.error("[spectateRoom] error:", err);
@@ -648,6 +515,7 @@ module.exports = (server) => {
     // Quick play matchmaking
     socket.on("quickPlay", async (playerId) => {
       try {
+        if (!playerId) return;
         const appSettings = await AppSettings.getSettings();
         if (isMaintenanceActive(appSettings, playerId)) {
           socket.emit("maintenanceMode", {
@@ -655,9 +523,11 @@ module.exports = (server) => {
           });
           return;
         }
-        // Register presence before entering quick play
-        registerUserSocket(socket, playerId);
-        presenceService.setOnline(playerId);
+        presenceService.attachSocket(socket, playerId);
+        // A repeated tap while already in the open lobby keeps the seat.
+        if (socket.gameRoomId && socket.gameRoomId !== getActiveQuickPlayRoomId()) {
+          await leaveCurrentRoom(socket);
+        }
         await findOrCreateQuickPlayRoom(io, socket, playerId);
       } catch (error) {
         console.error("[QuickPlay] Error:", error);
@@ -666,7 +536,7 @@ module.exports = (server) => {
     });
 
     // Invite a friend to your current room
-    socket.on("inviteFriend", async ({ friendId, roomId }) => {
+    socket.on("inviteFriend", async ({ friendId, roomId } = {}) => {
       try {
         const playerId = socket.playerId;
         if (!playerId || !friendId || !roomId) return;
@@ -712,35 +582,39 @@ module.exports = (server) => {
     socket.on("disconnect", () => {
       console.log("Client disconnected");
       const playerId = socket.playerId;
-      if (socket.gameRoomId) {
-        if (socket.isSpectator) {
-          // Spectators have no grace period, no host migration, no death.
-          leaveSpectator(io, socket, socket.gameRoomId, playerId);
-        } else {
-          leaveRoom(io, socket, socket.gameRoomId, playerId, false);
-        }
-        socket.gameRoomId = null;
-      }
-
-      // Debounced presence cleanup (waits before marking offline)
-      if (playerId) {
-        unregisterUserSocket(socket, playerId);
-      }
-      socket.playerId = null;
+      const roomId = socket.gameRoomId;
+      const wasSpectator = socket.isSpectator;
+      socket.gameRoomId = null;
       socket.isSpectator = false;
+      presenceService.detachSocket(socket);
       actionBuckets.delete(socket.id);
+
+      // Shutting down: the room state stays as-is and is resumed on restart.
+      if (io.shuttingDown) return;
+
+      if (roomId) {
+        const leaving = wasSpectator
+          ? leaveSpectator(io, socket, roomId, playerId)
+          : leaveRoom(io, socket, roomId, playerId, false);
+        leaving.catch((err) => console.error("[disconnect] leave failed:", err));
+      }
     });
 
     socket.on("home", async (clientUserId) => {
       // Prefer the trusted server-side socket.playerId; fall back to the
       // client-supplied userId so a fresh socket sitting on the home screen
       // (no room joined yet) still registers presence and counts as online.
-      const playerId = socket.playerId || clientUserId || null;
+      const playerId = socket.playerId || (clientUserId ? String(clientUserId) : null);
       if (playerId && !socket.playerId) {
         socket.playerId = playerId;
       }
       let roomId = socket.gameRoomId;
       const wasSpectator = socket.isSpectator;
+
+      // Player is back at home — online regardless of room state.
+      socket.gameRoomId = null;
+      socket.isSpectator = false;
+      if (playerId) presenceService.attachSocket(socket, playerId);
 
       // If socket state is out of sync, fall back to DB to find any active room
       // the player is still part of. This covers race conditions where the socket
@@ -748,10 +622,13 @@ module.exports = (server) => {
       // Skip the DB fallback for spectators — they're not in `players`.
       if (!roomId && playerId && !wasSpectator) {
         try {
-          const staleRoom = await Room.findOne({
-            status: { $in: ["waiting", "playing"] },
-            "players.player": playerId,
-          });
+          const staleRoom = await Room.findOne(
+            {
+              status: { $in: ["waiting", "playing"] },
+              "players.player": playerId,
+            },
+            "roomId",
+          ).lean();
           if (staleRoom) {
             roomId = staleRoom.roomId;
           }
@@ -761,23 +638,15 @@ module.exports = (server) => {
       }
 
       if (roomId) {
-        if (wasSpectator) {
-          leaveSpectator(io, socket, roomId, playerId);
-        } else {
-          leaveRoom(io, socket, roomId, playerId, true);
+        try {
+          if (wasSpectator) {
+            await leaveSpectator(io, socket, roomId, playerId);
+          } else {
+            await leaveRoom(io, socket, roomId, playerId, true);
+          }
+        } catch (err) {
+          console.error("[home] leave failed:", err);
         }
-        socket.gameRoomId = null;
-        socket.isSpectator = false;
-        // Don't null playerId — socket is still connected, need it for disconnect cleanup
-      }
-
-      // Player is back at home — mark online regardless of room state.
-      // registerUserSocket is idempotent (Set add) and required so disconnect
-      // properly schedules offline for users that reach home before any room.
-      if (playerId) {
-        registerUserSocket(socket, playerId);
-        presenceService.setOnline(playerId);
-        notifyFriendsPresence(playerId);
       }
     });
 
@@ -805,22 +674,10 @@ module.exports = (server) => {
     //start the game (do not allow players to join)
     socket.on("startGame", async (arg) => {
       if (socket.isSpectator) return;
-      await startGame(io, socket, arg);
-      // Update presence for all players so friends see roomStatus: "playing"
-      const { roomId } = arg || {};
-      if (!roomId) return;
       try {
-        const startedRoom = await Room.findOne({ roomId }).lean();
-        if (startedRoom?.status === "playing") {
-          for (const p of startedRoom.players) {
-            const pid = p.player?.toString();
-            if (!pid) continue;
-            presenceService.setPlaying(pid, roomId, "playing");
-            notifyFriendsPresence(pid).catch(() => {});
-          }
-        }
+        await startGame(io, socket, arg);
       } catch (err) {
-        console.error("[startGame] presence update error:", err);
+        console.error("[startGame] error:", err);
       }
     });
 
@@ -909,11 +766,10 @@ module.exports = (server) => {
     // playerOnly (that early-returns for spectators). Still rate-limited.
     socket.on("rematchJoin", async (arg) => {
       if (!consumeActionToken(socket.id)) return;
-      const joinedUserId = await joinRematch(io, socket, arg);
-      if (joinedUserId) {
-        // Spectator -> player: now "playing" so friends see them in a room.
-        presenceService.setPlaying(joinedUserId, arg?.roomId);
-        notifyFriendsPresence(joinedUserId);
+      try {
+        await joinRematch(io, socket, arg);
+      } catch (err) {
+        console.error("[rematchJoin] error:", err);
       }
     });
     //............................................................

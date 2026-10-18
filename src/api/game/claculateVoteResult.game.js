@@ -1,45 +1,44 @@
 const Room = require("../models/room.model");
-const res = require("./results.game");
-const { startTimer } = require("./timer.game");
-const { clearSkipVotes } = require("./skipDiscussion.game");
-const { clearMutedPlayers } = require("./mutePlayer.game");
-const resetPlayingStatus = async (roomId) => {
-  try {
-    const room = await Room.findOne({ roomId });
-    room.players.forEach((P) => {
-      P.playStatus = "playing";
-    });
-    room.votes = [];
-    room.al3omdaTargets = [];
-    room.ba3atiTargets = [];
-    room.damazeenTargets = [];
-    room.sitAlwada3Targets = [];
-    room.abuJanzeerTargets = [];
-    room.ballahTargets = [];
-    room.ba3atiKabeerTargets = [];
-    room.ba3atiKabeerConvertTargets = [];
-    room.jenabuTargets = [];
-    room.wadAlzalatTargets = [];
-    room.damazeenProtection = false;
-    await room.save();
-    clearSkipVotes(roomId);
-    clearMutedPlayers(roomId);
-    return;
-  } catch (error) {
-    console.log(error);
-    return;
-  }
-};
-exports.claculateVoteResult = async (io, roomId) => {
-  //stop timer
-  startTimer(io, 1, roomId, "stop");
-  // Fetch the room
-  const room = await Room.findOne({ roomId }).populate("players.player");
-  if (!room) return null;
-  room.gamePhase = "voteResults";
-  const voteCounts = {};
+const { cancelTimer, setPhase, startPhaseTimer } = require("./timer.game");
+const { VOTE_RESULTS_TIME } = require("../../utils/constants");
+const { PLAYER_POPULATE, findPlayer } = require("./roomUtils");
 
+// Clears per-round action state for the next night.
+const resetRoundState = (room) => {
+  room.players.forEach((P) => {
+    P.playStatus = "playing";
+  });
+  room.votes = [];
+  room.al3omdaTargets = [];
+  room.ba3atiTargets = [];
+  room.damazeenTargets = [];
+  room.sitAlwada3Targets = [];
+  room.abuJanzeerTargets = [];
+  room.ballahTargets = [];
+  room.ba3atiKabeerTargets = [];
+  room.ba3atiKabeerConvertTargets = [];
+  room.jenabuTargets = [];
+  room.wadAlzalatTargets = [];
+  room.damazeenProtection = false;
+  room.skipVotes = [];
+  room.mutedPlayers = [];
+};
+
+// Resolves the vote. Runs under the room lock; the phase guard makes a second
+// trigger (vote timer racing the last vote) a no-op.
+exports.claculateVoteResult = async (io, roomId) => {
+  const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
+  if (!room || room.status !== "playing" || room.gamePhase !== "voting") {
+    return null;
+  }
+  cancelTimer(roomId);
+  io.to(roomId).emit("stopTimer");
+
+  // Only votes for players still alive count; anything else is ignored.
+  const voteCounts = {};
   room.votes.forEach((votedPlayerId) => {
+    const target = findPlayer(room, votedPlayerId);
+    if (!target || target.status !== "alive") return;
     voteCounts[votedPlayerId] = (voteCounts[votedPlayerId] || 0) + 1;
   });
 
@@ -48,28 +47,23 @@ exports.claculateVoteResult = async (io, roomId) => {
     .filter(([_, count]) => count === maxVotes)
     .map(([playerId]) => playerId);
 
-  // Handle tie scenario
-  const isTie = potentialEliminated.length > 1;
-
-  if (isTie || potentialEliminated.length === 0) {
-    // Emit a message to the room
-    await room.save();
-    io.to(roomId).emit("vote-res", { room, eliminated: null });
-  } else {
-    const eliminatedPlayer = room.players.find(
-      (p) => p.player._id == potentialEliminated[0],
-    );
-    if (!eliminatedPlayer) return;
-    eliminatedPlayer.status = "dead";
-    await room.save();
-    io.to(roomId).emit("vote-res", {
-      room,
-      eliminated: potentialEliminated[0],
-    });
+  let eliminated = null;
+  if (potentialEliminated.length === 1) {
+    const eliminatedPlayer = findPlayer(room, potentialEliminated[0]);
+    if (eliminatedPlayer) {
+      eliminatedPlayer.status = "dead";
+      eliminated = potentialEliminated[0];
+    }
   }
-  resetPlayingStatus(roomId);
-  setTimeout(() => {
-    res.nightResults(io, roomId, true);
-  }, 5000);
-  return;
+
+  setPhase(room, "voteResults", VOTE_RESULTS_TIME);
+  // Clients get this round's votes; the saved room is already reset for the
+  // next night (one save, so a crash can't leave a half-reset round).
+  const snapshot = room.toJSON();
+  resetRoundState(room);
+  await room.save();
+
+  io.to(roomId).emit("vote-res", { room: snapshot, eliminated });
+  startPhaseTimer(io, room);
+  return null;
 };

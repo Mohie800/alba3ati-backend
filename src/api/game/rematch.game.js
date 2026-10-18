@@ -1,19 +1,25 @@
 const Room = require("../models/room.model");
-const { clearSkipVotes } = require("./skipDiscussion.game");
-const { clearMutedPlayers } = require("./mutePlayer.game");
-const { clearRoleDeclarations } = require("./declareRole.game");
-const { cancelTimer, startTimer } = require("./timer.game");
+const {
+  cancelTimer,
+  setPhase,
+  startPhaseTimer,
+  getRemainingTime,
+  getTimerPhase,
+} = require("./timer.game");
+const { withRoomLock } = require("./roomLock");
+const { PLAYER_POPULATE, pidOf, hasPlayer } = require("./roomUtils");
+const { seatSocket } = require("./roomMembership");
+const { clearAllGracePeriodsForRoom } = require("./disconnect.game");
 const {
   calculateRandomDistribution,
 } = require("../../utils/randomDistribution");
-const { claculateResult } = require("./calculate.game");
 const {
   ROUND_TIME,
   QUICK_PLAY_DISCUSSION_TIME,
   QUICK_PLAY_MIN_PLAYERS,
+  MAX_ROOM_PLAYERS,
+  REMATCH_TIME,
 } = require("../../utils/constants");
-
-const REMATCH_TIMEOUT = 30; // seconds
 
 // Dev account that can start games below the minimum (mirrors startGame).
 const DEV_HOST_ID = "69c9ab1a6631e3885a13ed49";
@@ -29,33 +35,32 @@ const hasEnoughPlayers = (room, count) => {
   return count > 4;
 };
 
-// In-memory: roomId -> { timerId, tickId, startTime }
-const rematchTimers = new Map();
+const lockedByRoom = (fn) => (io, socket, arg) => {
+  const roomId = arg && arg.roomId;
+  if (!roomId) return;
+  return withRoomLock(roomId, () => fn(io, socket, arg));
+};
 
 /**
  * Host initiates rematch. Transitions game to "rematch" phase.
  */
-const startRematch = async (io, socket, { roomId }) => {
+const startRematch = lockedByRoom(async (io, socket, { roomId }) => {
   try {
     if (socket.gameRoomId !== roomId) return;
 
-    const room = await Room.findOne({ roomId }).populate("players.player");
-    if (!room) return;
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
+    if (!room || room.status !== "playing") return;
+    // Under the room lock a second start (two players tapping at once) sees
+    // "rematch" here and stops, so only one countdown can ever exist.
     if (room.gamePhase !== "gameOver") return;
 
-    // Prevent race condition: if a rematch timer is already running, someone beat us
-    if (rematchTimers.has(roomId)) return;
-
     // Verify the player is actually in this room
-    const inRoom = room.players.some(
-      (p) => p.player._id.toString() === socket.playerId,
-    );
-    if (!inRoom) return;
+    if (!hasPlayer(room, socket.playerId)) return;
 
     // Only host can start rematch (in quick play, anyone can)
     if (!room.isQuickPlay && room.host !== socket.playerId) return;
 
-    room.gamePhase = "rematch";
+    setPhase(room, "rematch", REMATCH_TIME);
     room.rematchAccepted = [socket.playerId]; // Host auto-accepts
     await room.save();
 
@@ -64,44 +69,27 @@ const startRematch = async (io, socket, { roomId }) => {
       acceptedIds: room.rematchAccepted,
     });
 
-    // Start rematch timeout with countdown ticks
-    let remaining = REMATCH_TIMEOUT;
-    const tickId = setInterval(() => {
-      remaining--;
-      io.to(roomId).emit("rematchTick", remaining);
-      if (remaining <= 0) {
-        clearInterval(tickId);
-      }
-    }, 1000);
-
-    const timerId = setTimeout(async () => {
-      await rematchTimeout(io, roomId);
-    }, REMATCH_TIMEOUT * 1000);
-
-    rematchTimers.set(roomId, { timerId, tickId, startTime: Date.now() });
+    // The phase timer runs rematchTimeout at the deadline (also after a restart).
+    startPhaseTimer(io, room);
   } catch (error) {
     console.error("[Rematch] Error starting rematch:", error);
   }
-};
+});
 
 /**
  * Player accepts rematch.
  */
-const acceptRematch = async (io, socket, { roomId }) => {
+const acceptRematch = lockedByRoom(async (io, socket, { roomId }) => {
   try {
     if (socket.gameRoomId !== roomId) return;
 
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room || room.gamePhase !== "rematch") return;
 
     const playerId = socket.playerId;
     if (!playerId) return;
 
-    // Check player is in the room
-    const inRoom = room.players.some(
-      (p) => p.player._id.toString() === playerId,
-    );
-    if (!inRoom) return;
+    if (!hasPlayer(room, playerId)) return;
 
     // Idempotent
     if (room.rematchAccepted.includes(playerId)) return;
@@ -116,7 +104,7 @@ const acceptRematch = async (io, socket, { roomId }) => {
   } catch (error) {
     console.error("[Rematch] Error accepting rematch:", error);
   }
-};
+});
 
 /**
  * Spectator opts into the rematch and becomes a player.
@@ -126,24 +114,23 @@ const acceptRematch = async (io, socket, { roomId }) => {
  * `room.players` + `rematchAccepted` with a live socket, the existing
  * begin/timeout logic includes them with no further changes.
  *
- * Returns the joined userId on success (so the socket layer can update presence),
- * otherwise undefined.
+ * Returns the joined userId on success, otherwise undefined.
  */
-const joinRematch = async (io, socket, { roomId }) => {
+const joinRematch = lockedByRoom(async (io, socket, { roomId }) => {
   try {
     if (socket.gameRoomId !== roomId) return;
 
     const userId = socket.playerId; // spectators have playerId set
     if (!userId || !socket.isSpectator) return;
 
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room || room.gamePhase !== "rematch") return;
 
     // Already a player? nothing to do.
-    if (room.players.some((p) => p.player._id.toString() === userId)) return;
+    if (hasPlayer(room, userId)) return;
 
     // Capacity guard — mirrors the joinRoom cap (socket.io.js).
-    if (room.players.length >= 20) {
+    if (room.players.length >= MAX_ROOM_PLAYERS) {
       socket.emit("rematchError", { message: "الغرفة ممتلئة" });
       return;
     }
@@ -158,10 +145,10 @@ const joinRematch = async (io, socket, { roomId }) => {
     }
     await room.save();
 
-    // Flip the socket out of read-only spectator mode.
-    socket.isSpectator = false;
+    // Out of read-only spectator mode; also counted in activePlayers/presence.
+    await seatSocket(io, socket, roomId, userId);
 
-    const updated = await Room.findOne({ roomId }).populate("players.player");
+    const updated = await room.populate(PLAYER_POPULATE);
 
     // Everyone refreshes the player list + accepted list + spectator count.
     io.to(roomId).emit("rematchUpdate", {
@@ -181,10 +168,10 @@ const joinRematch = async (io, socket, { roomId }) => {
   } catch (error) {
     console.error("[Rematch] Error joining rematch:", error);
   }
-};
+});
 
 /**
- * Get connected player IDs in a socket room.
+ * Get connected (non-spectator) player IDs in a socket room.
  */
 const getConnectedPlayerIds = (io, roomId) => {
   const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
@@ -192,7 +179,7 @@ const getConnectedPlayerIds = (io, roomId) => {
   if (socketsInRoom) {
     for (const sid of socketsInRoom) {
       const s = io.sockets.sockets.get(sid);
-      if (s?.playerId) connectedIds.add(s.playerId);
+      if (s?.playerId && !s.isSpectator) connectedIds.add(s.playerId);
     }
   }
   return connectedIds;
@@ -201,12 +188,12 @@ const getConnectedPlayerIds = (io, roomId) => {
 /**
  * Host begins the new game with accepted players.
  */
-const beginRematch = async (io, socket, { roomId }) => {
+const beginRematch = lockedByRoom(async (io, socket, { roomId }) => {
   try {
     if (socket.gameRoomId !== roomId) return;
 
-    const room = await Room.findOne({ roomId }).populate("players.player");
-    if (!room || room.gamePhase !== "rematch") return;
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
+    if (!room || room.status !== "playing" || room.gamePhase !== "rematch") return;
     if (!room.isQuickPlay && room.host !== socket.playerId) return;
     // In quick play, only the player who started rematch (first in acceptedIds) can begin
     if (room.isQuickPlay && room.rematchAccepted[0] !== socket.playerId) return;
@@ -223,38 +210,38 @@ const beginRematch = async (io, socket, { roomId }) => {
       return;
     }
 
-    clearRematchTimer(roomId);
-
-    // Remove players who didn't accept or aren't connected
-    room.players = room.players.filter((p) =>
-      eligibleIds.includes(p.player._id.toString()),
-    );
-
-    resetRoomForRematch(room);
-
-    if (room.isQuickPlay) {
-      await autoStartQuickPlayRematch(io, room);
-    } else {
-      await room.save();
-      const updatedRoom = await Room.findOne({ roomId }).populate(
-        "players.player",
-      );
-      io.to(roomId).emit("rematchBegin", { room: updatedRoom });
-    }
+    await launchRematch(io, room, eligibleIds);
   } catch (error) {
     console.error("[Rematch] Error beginning rematch:", error);
   }
+});
+
+// Starts the next game with `eligibleIds`. The rematch timer is cleared only
+// after the new state is saved, so a failed save can't strand the room.
+const launchRematch = async (io, room, eligibleIds) => {
+  const roomId = room.roomId;
+  room.players = room.players.filter((p) => eligibleIds.includes(pidOf(p)));
+  resetRoomForRematch(room);
+
+  if (room.isQuickPlay) {
+    await autoStartQuickPlayRematch(io, room);
+  } else {
+    await room.save();
+    io.to(roomId).emit("rematchBegin", { room });
+  }
+  clearRematchTimer(roomId);
 };
 
 /**
- * Called when rematch timeout expires.
+ * Rematch deadline reached. Runs under the room lock (phase timer).
  */
 const rematchTimeout = async (io, roomId) => {
   try {
-    clearRematchTimer(roomId);
-
-    const room = await Room.findOne({ roomId }).populate("players.player");
-    if (!room || room.gamePhase !== "rematch") return;
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
+    if (!room || room.status !== "playing" || room.gamePhase !== "rematch") {
+      clearRematchTimer(roomId);
+      return;
+    }
 
     const connectedIds = getConnectedPlayerIds(io, roomId);
     const eligibleIds = room.rematchAccepted.filter((id) =>
@@ -263,24 +250,14 @@ const rematchTimeout = async (io, roomId) => {
 
     if (hasEnoughPlayers(room, eligibleIds.length)) {
       // Auto-begin with accepted + connected players
-      room.players = room.players.filter((p) =>
-        eligibleIds.includes(p.player._id.toString()),
-      );
-      resetRoomForRematch(room);
-
-      if (room.isQuickPlay) {
-        await autoStartQuickPlayRematch(io, room);
-      } else {
-        await room.save();
-        const updatedRoom = await Room.findOne({ roomId }).populate(
-          "players.player",
-        );
-        io.to(roomId).emit("rematchBegin", { room: updatedRoom });
-      }
+      await launchRematch(io, room, eligibleIds);
     } else {
       // Not enough players, close room
       room.status = "ended";
       await room.save();
+      clearRematchTimer(roomId);
+      clearAllGracePeriodsForRoom(roomId);
+      cancelTimer(roomId);
       io.to(roomId).emit("roomClosed", { reason: "rematchTimeout" });
     }
   } catch (error) {
@@ -292,14 +269,13 @@ const rematchTimeout = async (io, roomId) => {
  * Reset room fields for a new game.
  */
 const resetRoomForRematch = (room) => {
-  // Clear in-memory state from previous game
-  clearSkipVotes(room.roomId);
-  clearMutedPlayers(room.roomId);
-  clearRoleDeclarations(room.roomId);
   cancelTimer(room.roomId);
 
   room.status = "playing";
-  room.gamePhase = "roleSetup";
+  setPhase(room, "roleSetup");
+  room.skipVotes = [];
+  room.mutedPlayers = [];
+  room.roleDeclarations = new Map();
   room.gameResult = null;
   room.roundNumber = 1;
   room.votes = [];
@@ -313,6 +289,7 @@ const resetRoomForRematch = (room) => {
     p.kills = 0;
     p.target = null;
     p.playStatus = "playing";
+    p.leftMidGame = false;
   });
 
   // Reset all action targets
@@ -372,32 +349,23 @@ const autoStartQuickPlayRematch = async (io, room) => {
     player.roleId = rolePool[index];
   });
 
-  room.gamePhase = "night";
+  setPhase(room, "night", ROUND_TIME);
   room.discussionTime = QUICK_PLAY_DISCUSSION_TIME;
   room.votesVisible = false;
   room.deadChat = false;
   await room.save();
 
-  startTimer(io, ROUND_TIME, room.roomId, "timerEnd", claculateResult);
+  startPhaseTimer(io, room);
   // Emit rematchBegin so excluded players get properly cleaned up
   io.to(room.roomId).emit("rematchBegin", { room });
 };
 
 const clearRematchTimer = (roomId) => {
-  const entry = rematchTimers.get(roomId);
-  if (entry) {
-    clearTimeout(entry.timerId);
-    clearInterval(entry.tickId);
-    rematchTimers.delete(roomId);
-  }
+  if (getTimerPhase(roomId) === "rematch") cancelTimer(roomId);
 };
 
-const getRematchRemainingTime = (roomId) => {
-  const entry = rematchTimers.get(roomId);
-  if (!entry) return 0;
-  const elapsed = Math.floor((Date.now() - entry.startTime) / 1000);
-  return Math.max(0, REMATCH_TIMEOUT - elapsed);
-};
+const getRematchRemainingTime = (roomId) =>
+  getTimerPhase(roomId) === "rematch" ? getRemainingTime(roomId) : 0;
 
 module.exports = {
   startRematch,
@@ -406,4 +374,5 @@ module.exports = {
   beginRematch,
   clearRematchTimer,
   getRematchRemainingTime,
+  rematchTimeout,
 };

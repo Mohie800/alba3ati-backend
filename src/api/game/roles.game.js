@@ -2,19 +2,46 @@ const { ROUND_TIME, MANDATORY_ROLE_IDS } = require("../../utils/constants");
 const Room = require("../models/room.model");
 const RoleConfig = require("../models/roleConfig.model");
 const User = require("../models/user.model");
-const { claculateResult } = require("./calculate.game");
-const { startTimer } = require("./timer.game");
-exports.assignRoles = async (
+const { setPhase, startPhaseTimer } = require("./timer.game");
+const { withRoomLock } = require("./roomLock");
+const { PLAYER_POPULATE } = require("./roomUtils");
+
+exports.assignRoles = (io, socket, arg) => {
+  const roomId = arg && arg.roomId;
+  if (!roomId) return;
+  return withRoomLock(roomId, () => assignRolesLocked(io, socket, arg));
+};
+
+const assignRolesLocked = async (
   io,
   socket,
   { roomId, distribution, discussionTime, votesVisible, deadChat }
 ) => {
   try {
-    const room = await Room.findOne({ roomId }).populate("players.player");
+    const room = await Room.findOne({ roomId }).populate(PLAYER_POPULATE);
     if (!room) return;
+
+    // Roles are dealt once per game; a repeated emit must not reshuffle.
+    if (room.status !== "playing" || room.gamePhase !== "roleSetup") return;
 
     // Only the host configures the role distribution.
     if (socket.playerId && room.host && socket.playerId !== room.host) return;
+
+    // Counts come from the client: reject anything that isn't a small
+    // non-negative integer, or that leaves a player without a role.
+    // Entries of deleted users (null) are hidden from clients, so they are
+    // neither counted nor dealt a role.
+    const realPlayers = room.players.filter((p) => p.player);
+    const counts = Object.values(distribution || {});
+    const total = counts.reduce((sum, c) => sum + (Number(c) || 0), 0);
+    if (
+      counts.some((c) => !Number.isInteger(c) || c < 0) ||
+      total < realPlayers.length ||
+      total > realPlayers.length * 2
+    ) {
+      socket.emit("assignmentError", { message: "توزيع الأدوار غير صالح" });
+      return;
+    }
 
     // Locked-role gate: a locked role may only be put into play if the HOST
     // owns it. Mandatory core roles are always allowed. Once allowed, the role
@@ -53,16 +80,16 @@ exports.assignRoles = async (
     });
 
     // Shuffle players and assign roles
-    const shuffledPlayers = shuffleArray([...room.players]);
+    const shuffledPlayers = shuffleArray([...realPlayers]);
     shuffledPlayers.forEach((player, index) => {
       // Assign the role from rolePool to the player's roleId
       player.roleId = rolePool[index];
     });
 
     // Update room with assignments
-    room.gamePhase = "night";
+    setPhase(room, "night", ROUND_TIME);
     await room.save();
-    startTimer(io, ROUND_TIME, roomId, "timerEnd", claculateResult);
+    startPhaseTimer(io, room);
 
     // Notify all players
     io.to(roomId).emit("rolesAssigned", {

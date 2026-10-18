@@ -1,66 +1,142 @@
-// In-memory presence tracking
-// presenceMap: Map<string(userId), { status: 'online'|'playing', roomId?: string }>
-const presenceMap = new Map();
+// Presence is derived from live sockets, never set directly:
+//   no sockets (after debounce)         -> offline
+//   a socket seated in a non-ended room -> playing (roomId, roomStatus)
+//   otherwise                           -> online
+// Callers only report facts (socket identified / left / changed room, room
+// status changed) and call refreshSocket; listeners hear only real changes.
 
-// Debounce timers for offline transitions (prevents flicker on brief disconnects)
-// pendingOffline: Map<string(userId), timeoutId>
-const pendingOffline = new Map();
+const userSockets = new Map(); // userId -> Set<socket>
+const presenceMap = new Map(); // userId -> { status, roomId?, roomStatus? }
+const pendingOffline = new Map(); // userId -> timeout
+const roomStatuses = new Map(); // roomId -> "waiting" | "playing" | "ended"
 const OFFLINE_DEBOUNCE_MS = 5000;
+
+let ioRef = null;
+let changeListener = null;
 
 // Friends list cache: Map<string(userId), { friends: string[], expiresAt: number }>
 const friendsCache = new Map();
 const FRIENDS_CACHE_TTL = 60 * 1000;
 
-// --- Key normalization (all Map keys are strings) ---
 function normalize(userId) {
-  return userId?.toString();
+  return userId ? userId.toString() : null;
 }
 
-// --- Presence state ---
-
-function setOnline(userId) {
-  const id = normalize(userId);
-  cancelPendingOffline(id);
-  presenceMap.set(id, { status: "online" });
+function init(io, onChange) {
+  ioRef = io;
+  changeListener = onChange;
 }
 
-function setPlaying(userId, roomId, roomStatus = "waiting") {
-  const id = normalize(userId);
-  cancelPendingOffline(id);
-  presenceMap.set(id, { status: "playing", roomId, roomStatus });
+function samePresence(a, b) {
+  if (!a || !b) return a === b;
+  return (
+    a.status === b.status && a.roomId === b.roomId && a.roomStatus === b.roomStatus
+  );
 }
 
-function setOffline(userId) {
-  const id = normalize(userId);
-  cancelPendingOffline(id);
-  presenceMap.delete(id);
+function compute(id) {
+  const sockets = userSockets.get(id);
+  if (!sockets || sockets.size === 0) return null;
+  for (const s of sockets) {
+    const roomId = s.gameRoomId;
+    if (!roomId || s.isSpectator) continue;
+    const roomStatus = roomStatuses.get(roomId) || "waiting";
+    if (roomStatus === "ended") continue;
+    return { status: "playing", roomId, roomStatus };
+  }
+  return { status: "online" };
 }
 
-/**
- * Debounced offline: waits OFFLINE_DEBOUNCE_MS before marking offline.
- * If the user reconnects before the timer fires, cancelPendingOffline is
- * called (via setOnline/setPlaying) and the offline transition never happens.
- * @param {string} userId
- * @param {function} [onOffline] - callback(normalizedId) when actually going offline
- */
-function scheduleOffline(userId, onOffline) {
-  const id = normalize(userId);
-  if (pendingOffline.has(id)) return; // already scheduled
-  const timer = setTimeout(() => {
-    pendingOffline.delete(id);
-    presenceMap.delete(id);
-    if (onOffline) onOffline(id);
-  }, OFFLINE_DEBOUNCE_MS);
-  pendingOffline.set(id, timer);
+function publish(id, next) {
+  const prev = presenceMap.get(id) || null;
+  if (samePresence(prev, next)) return;
+  if (next) presenceMap.set(id, next);
+  else presenceMap.delete(id);
+  if (changeListener) {
+    try {
+      changeListener(id, next || { status: "offline" });
+    } catch (err) {
+      console.error("[Presence] change listener error:", err);
+    }
+  }
 }
 
-function cancelPendingOffline(userId) {
+function refresh(userId) {
   const id = normalize(userId);
+  if (!id) return;
+  // While the offline debounce runs, keep showing the last known presence.
+  if (!userSockets.get(id)?.size) return;
+  publish(id, compute(id));
+}
+
+function cancelPendingOffline(id) {
   const timer = pendingOffline.get(id);
   if (timer) {
     clearTimeout(timer);
     pendingOffline.delete(id);
   }
+}
+
+// Bind a socket to a user. Re-binding to another user releases the old one,
+// so an account switch on the same socket can't leave a ghost online.
+function attachSocket(socket, userId) {
+  const id = normalize(userId);
+  if (!id) return;
+  const current = socket.data.presenceUserId;
+  if (current === id) {
+    refresh(id);
+    return;
+  }
+  if (current) detachSocket(socket);
+  socket.data.presenceUserId = id;
+  if (!userSockets.has(id)) userSockets.set(id, new Set());
+  userSockets.get(id).add(socket);
+  cancelPendingOffline(id);
+  refresh(id);
+}
+
+function detachSocket(socket) {
+  const id = socket.data.presenceUserId;
+  if (!id) return;
+  socket.data.presenceUserId = null;
+  const sockets = userSockets.get(id);
+  if (sockets) sockets.delete(socket);
+  if (sockets && sockets.size > 0) {
+    refresh(id);
+    return;
+  }
+  userSockets.delete(id);
+  if (pendingOffline.has(id)) return;
+  pendingOffline.set(
+    id,
+    setTimeout(() => {
+      pendingOffline.delete(id);
+      if (userSockets.get(id)?.size) return;
+      publish(id, null);
+    }, OFFLINE_DEBOUNCE_MS),
+  );
+}
+
+function refreshSocket(socket) {
+  const id = socket.data.presenceUserId;
+  if (id) refresh(id);
+}
+
+function setRoomStatus(roomId, status) {
+  if (!roomId) return;
+  if (roomStatuses.get(roomId) === status) return;
+  roomStatuses.set(roomId, status);
+  const members = ioRef?.sockets.adapter.rooms.get(roomId);
+  if (!members) return;
+  for (const sid of members) {
+    const s = ioRef.sockets.sockets.get(sid);
+    if (s) refreshSocket(s);
+  }
+}
+
+function getSocketIds(userId) {
+  const sockets = userSockets.get(normalize(userId));
+  return sockets ? [...sockets].map((s) => s.id) : [];
 }
 
 function getPresence(userId) {
@@ -109,7 +185,7 @@ setInterval(
     }
   },
   5 * 60 * 1000,
-);
+).unref();
 
 function getOnlineCount() {
   return presenceMap.size;
@@ -124,11 +200,12 @@ function getOnlinePlayers() {
 }
 
 module.exports = {
-  setOnline,
-  setPlaying,
-  setOffline,
-  scheduleOffline,
-  cancelPendingOffline,
+  init,
+  attachSocket,
+  detachSocket,
+  refreshSocket,
+  setRoomStatus,
+  getSocketIds,
   getPresence,
   getMultiplePresence,
   isOnline,
