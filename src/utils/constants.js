@@ -23,7 +23,7 @@ exports.REMATCH_TIME = 30;
 
 // Per-second "tick"/"rematchTick" events for app builds that don't read
 // phaseEndsAt yet. Turn off once those builds are gone.
-exports.LEGACY_TICKS = true;
+exports.LEGACY_TICKS = false;
 
 // After a server restart: reconnect window for every seated player, and the
 // minimum time left in a running phase so players can reconnect first.
