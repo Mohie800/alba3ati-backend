@@ -51,6 +51,14 @@ const nightResults = async (io, roomId, voted) => {
       cancelTimer(roomId);
       setPhase(room, "gameOver");
       room.gameResult = win;
+      room.gamesCompleted = (room.gamesCompleted || 0) + 1;
+      room.gameHistory.push({
+        result: win,
+        endedAt: new Date(),
+        playerCount: room.players.filter((p) => p.player).length,
+        rounds: room.roundNumber,
+      });
+      if (room.gameHistory.length > 50) room.gameHistory.splice(0, room.gameHistory.length - 50);
       await room.save();
       const coinRewards = await updatePlayerStats(room, win);
       recordGameEnd(room, win);

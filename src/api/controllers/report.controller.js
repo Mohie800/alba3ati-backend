@@ -1,4 +1,5 @@
 const Report = require("../models/report.model");
+const { containsRegex, dateRange } = require("../../utils/listQuery");
 const User = require("../models/user.model");
 const BannedDevice = require("../models/bannedDevice.model");
 const Notification = require("../models/notification.model");
@@ -48,6 +49,18 @@ exports.getReports = async (req, res) => {
     const query = {};
     if (status) query.status = status;
     if (reason) query.reason = reason;
+    const term = (req.query.search || "").trim();
+    if (term) {
+      const rx = containsRegex(term);
+      query.$or = [
+        { reporterName: rx },
+        { reportedPlayerName: rx },
+        { roomId: term.toLowerCase() },
+        { details: rx },
+      ];
+    }
+    const created = dateRange(req.query.from, req.query.to);
+    if (created) query.createdAt = created;
 
     const [reports, total] = await Promise.all([
       Report.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),

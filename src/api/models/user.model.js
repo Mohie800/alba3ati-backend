@@ -24,6 +24,13 @@ const userSchema = new mongoose.Schema({
     friendActivity: { type: Boolean, default: true },
   },
   friendCount: { type: Number, default: 0 },
+  // Referrals: code is generated lazily; reward pays out on the referee's first finished game
+  referralCode: { type: String, unique: true, sparse: true },
+  referredBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null, index: true },
+  referralStatus: { type: String, enum: ["pending", "rewarded", null], default: null },
+  referralRewardedAt: { type: Date, default: null },
+  // Device had never been seen when this account was created; required to accept a code
+  referralEligible: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
   stats: {
     gamesPlayed: { type: Number, default: 0 },

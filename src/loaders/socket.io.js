@@ -71,7 +71,10 @@ const {
   beginRematch,
   getRematchRemainingTime,
 } = require("../api/game/rematch.game");
-const { updatePeakConcurrent } = require("../api/game/dailyStats.game");
+const {
+  updatePeakConcurrent,
+  sampleConcurrency,
+} = require("../api/game/dailyStats.game");
 const { withRoomLock } = require("../api/game/roomLock");
 const { PLAYER_POPULATE, pidOf, findPlayer } = require("../api/game/roomUtils");
 const { broadcastRoomsUpdate } = require("../api/game/roomsList");
@@ -113,7 +116,7 @@ module.exports = (server) => {
       }
 
       const err = new Error("DEVICE_BANNED");
-      err.data = { reason: banned.reason };
+      err.data = { reason: banned.reason, expiresAt: banned.expiresAt };
       next(err);
     } catch {
       next(); // fail open on DB error to avoid locking out all users
@@ -168,6 +171,11 @@ module.exports = (server) => {
   // Sweep orphaned grace-period timers (safety net for room-end paths
   // that don't call clearAllGracePeriodsForRoom)
   startGraceSweep();
+
+  // Peak online users / players in games, sampled every 30s
+  setInterval(() => {
+    sampleConcurrency(presenceService.getConnectedUserCount());
+  }, 30 * 1000).unref();
 
   // Periodic cleanup: end stale rooms with 0 active sockets every 5 minutes
   setInterval(

@@ -37,6 +37,17 @@ const RoomSchema = new mongoose.Schema(
     // When the current timed phase ends; null for phases that wait on players.
     phaseEndsAt: { type: Date, default: null },
     gameResult: { type: String, default: null },
+    // Rematches reuse this document; these keep what earlier games in the room did
+    gamesCompleted: { type: Number, default: 0 },
+    gameHistory: [
+      {
+        _id: false,
+        result: String,
+        endedAt: Date,
+        playerCount: Number,
+        rounds: Number,
+      },
+    ],
     // Discussion/phase state kept on the room so it survives a restart.
     skipVotes: [{ type: String }],
     mutedPlayers: [{ type: String }],

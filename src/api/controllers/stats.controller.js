@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const User = require("../models/user.model");
 const Room = require("../models/room.model");
 const Contact = require("../models/contact.model");
@@ -40,6 +41,9 @@ exports.getDashboardStats = async (req, res) => {
     const io = req.app.get("io");
     const onlinePlayers = presenceService.getOnlineCount();
     const activeSocketConnections = io ? io.engine.clientsCount : 0;
+    const playersInGames = await require("../game/dailyStats.game")
+      .countPlayersInGames()
+      .catch(() => 0);
 
     res.json({
       success: true,
@@ -51,6 +55,7 @@ exports.getDashboardStats = async (req, res) => {
         activeRooms,
         activeConnections,
         onlinePlayers,
+        playersInGames,
         activeSocketConnections,
         newContacts,
         pendingReports,
@@ -62,37 +67,75 @@ exports.getDashboardStats = async (req, res) => {
 };
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const { paging, containsRegex, dateRange, sortSpec } = require("../../utils/listQuery");
 
+const PLAYER_SORTS = {
+  createdAt: "createdAt",
+  coins: "coins",
+  gamesPlayed: "stats.gamesPlayed",
+  gamesWon: "stats.gamesWon",
+  name: "name",
+};
+
+// ?search=&authProvider=guest|google&referred=yes|no&activity=played|never&from=&to=&sort=-coins
 exports.getPlayers = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const { page, limit, skip } = paging(req.query);
     const search = req.query.search || "";
     const searchBy = req.query.searchBy || "";
-    const skip = (page - 1) * limit;
 
-    let query = {};
+    const query = {};
     if (search) {
-      const safe = escapeRegex(search);
+      const safe = escapeRegex(search.trim());
       const rx = { $regex: safe, $options: "i" };
       if (searchBy === "name" || searchBy === "email" || searchBy === "deviceId") {
         // Explicit single-field search (kept for backward compatibility).
-        query = { [searchBy]: rx };
+        query[searchBy] = rx;
       } else {
-        // Unified search: match name, email, or device ID in one input.
-        query = { $or: [{ name: rx }, { email: rx }, { deviceId: rx }] };
+        // Unified search: name, email, device ID, referral code, or exact player id
+        const or = [{ name: rx }, { email: rx }, { deviceId: rx }];
+        if (/^[A-Za-z0-9]{6}$/.test(search.trim())) {
+          or.push({ referralCode: search.trim().toUpperCase() });
+        }
+        if (mongoose.isValidObjectId(search.trim())) or.push({ _id: search.trim() });
+        query.$or = or;
       }
     }
+    if (req.query.authProvider === "guest" || req.query.authProvider === "google") {
+      query.authProvider = req.query.authProvider;
+    }
+    if (req.query.referred === "yes") query.referredBy = { $ne: null };
+    if (req.query.referred === "no") query.referredBy = null;
+    if (req.query.activity === "played") query["stats.gamesPlayed"] = { $gt: 0 };
+    if (req.query.activity === "never") query["stats.gamesPlayed"] = { $in: [0, null] };
+    const joined = dateRange(req.query.from, req.query.to);
+    if (joined) query.createdAt = joined;
+
+    const sort = sortSpec(req.query.sort, PLAYER_SORTS, { createdAt: -1 });
 
     const [players, total] = await Promise.all([
-      User.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      User.find(query).sort(sort).skip(skip).limit(limit),
       User.countDocuments(query),
     ]);
+
+    // Flag banned devices on this page so the table can badge them
+    const deviceIds = players.map((p) => p.deviceId).filter(Boolean);
+    const banned = deviceIds.length
+      ? await BannedDevice.find({
+          deviceId: { $in: deviceIds.map((d) => d.toLowerCase()) },
+          $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }],
+        }).select("deviceId")
+      : [];
+    const bannedSet = new Set(banned.map((b) => b.deviceId));
+    const rows = players.map((p) => ({
+      ...p.toObject(),
+      isBanned: !!p.deviceId && bannedSet.has(p.deviceId.toLowerCase()),
+    }));
 
     res.json({
       success: true,
       data: {
-        players,
+        players: rows,
         total,
         page,
         pages: Math.ceil(total / limit),
@@ -112,7 +155,7 @@ exports.getPlayerDetail = async (req, res) => {
         .json({ success: false, message: "Player not found" });
     }
 
-    const [games, deviceBanned] = await Promise.all([
+    const [games, deviceBanned, referrer, referred] = await Promise.all([
       Room.find({ "players.player": req.params.id })
         .select("roomId status players roundNumber createdAt")
         .sort({ createdAt: -1 })
@@ -120,30 +163,70 @@ exports.getPlayerDetail = async (req, res) => {
       player.deviceId
         ? BannedDevice.findOne({ deviceId: player.deviceId })
         : null,
+      player.referredBy
+        ? User.findById(player.referredBy).select("_id name referralCode")
+        : null,
+      User.find({ referredBy: player._id })
+        .select("_id name createdAt referralStatus")
+        .sort({ createdAt: -1 })
+        .limit(100),
     ]);
 
     res.json({
       success: true,
-      data: { player, games, deviceBanned: !!deviceBanned },
+      data: {
+        player,
+        games,
+        deviceBanned: !!deviceBanned,
+        referral: { referrer, referred },
+      },
     });
   } catch (err) {
     res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
+const GAME_SORTS = {
+  createdAt: "createdAt",
+  players: "activePlayers",
+  rounds: "roundNumber",
+  games: "gamesCompleted",
+};
+
+// ?status=&type=public|private|quick&result=0|1|2|3&rematch=yes|no&search=<room code or player name>&from=&to=&sort=
 exports.getGames = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const status = req.query.status;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = paging(req.query);
+    const { status, type, result } = req.query;
 
-    const query = status ? { status } : {};
+    const query = {};
+    if (["waiting", "playing", "ended"].includes(status)) query.status = status;
+    if (type === "quick") query.isQuickPlay = true;
+    if (type === "public") Object.assign(query, { isPublic: true, isQuickPlay: { $ne: true } });
+    if (type === "private") Object.assign(query, { isPublic: { $ne: true }, isQuickPlay: { $ne: true } });
+    if (["0", "1", "2", "3"].includes(result)) query.gameResult = result;
+    if (req.query.rematch === "yes") query.gamesCompleted = { $gte: 2 };
+    if (req.query.rematch === "no") query.gamesCompleted = { $lt: 2 };
+    const created = dateRange(req.query.from, req.query.to);
+    if (created) query.createdAt = created;
+
+    const term = (req.query.search || "").trim();
+    if (term) {
+      const players = await User.find({ name: containsRegex(term) })
+        .select("_id")
+        .limit(200);
+      query.$or = [
+        { roomId: term.toLowerCase() },
+        { "players.player": { $in: players.map((p) => p._id) } },
+      ];
+    }
+
+    const sort = sortSpec(req.query.sort, GAME_SORTS, { createdAt: -1 });
 
     const [games, total] = await Promise.all([
       Room.find(query)
-        .select("roomId status activePlayers players createdAt")
-        .sort({ createdAt: -1 })
+        .select("roomId status activePlayers players createdAt isPublic isQuickPlay gameResult roundNumber host gamesCompleted")
+        .sort(sort)
         .skip(skip)
         .limit(limit),
       Room.countDocuments(query),
@@ -287,6 +370,56 @@ exports.deletePlayer = async (req, res) => {
 
     res.json({ success: true, message: "Player deleted" });
   } catch (err) {
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+const TX_TYPES = [
+  "game_complete",
+  "game_win",
+  "ad_reward",
+  "shop_purchase",
+  "role_purchase",
+  "admin_adjust",
+  "referral_bonus",
+];
+
+// GET /api/admin/coin-transactions?type=&direction=earn|spend&search=<player>&from=&to=&page=
+exports.getCoinTransactions = async (req, res) => {
+  try {
+    const CoinTransaction = require("../models/coinTransaction.model");
+    const { page, limit, skip } = paging(req.query, 25);
+    const query = {};
+    if (TX_TYPES.includes(req.query.type)) query.type = req.query.type;
+    if (req.query.direction === "earn") query.amount = { $gt: 0 };
+    if (req.query.direction === "spend") query.amount = { $lt: 0 };
+    const created = dateRange(req.query.from, req.query.to);
+    if (created) query.createdAt = created;
+    const term = (req.query.search || "").trim();
+    if (term) {
+      const ids = mongoose.isValidObjectId(term)
+        ? [term]
+        : (await User.find({ name: containsRegex(term) }).select("_id").limit(200)).map(
+            (u) => u._id,
+          );
+      query.user = { $in: ids };
+    }
+
+    const [transactions, total] = await Promise.all([
+      CoinTransaction.find(query)
+        .populate("user", "_id name")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      CoinTransaction.countDocuments(query),
+    ]);
+    res.json({
+      success: true,
+      data: { transactions, total, page, pages: Math.ceil(total / limit) },
+    });
+  } catch (err) {
+    console.error("getCoinTransactions error:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 };

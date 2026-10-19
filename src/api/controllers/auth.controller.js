@@ -4,12 +4,18 @@ const NameChangeLog = require("../models/nameChangeLog.model");
 const config = require("../../config/config");
 const { recordNewUser } = require("../game/dailyStats.game");
 const { verifyGoogleToken } = require("../../utils/google");
+const {
+  isDeviceNew,
+  markDeviceSeen,
+  linkReferral,
+  ensureReferralCode,
+} = require("../services/referral.service");
 
 const normalizeDeviceId = (id) => (id ? id.trim().toLowerCase() : null);
 
 exports.register = async (req, res) => {
   try {
-    const { name, deviceId } = req.body;
+    const { name, deviceId, referralCode } = req.body;
 
     // Validate input
     if (!name) {
@@ -35,18 +41,34 @@ exports.register = async (req, res) => {
             code: "DEVICE_BANNED",
             error: "This device has been banned",
             reason: banned.reason,
+            expiresAt: banned.expiresAt,
           });
         }
       }
     }
+
+    const deviceIsNew = await isDeviceNew(normalizedDeviceId);
 
     // Create a new user
     const user = await User.create({
       name,
       deviceId: deviceId || null,
       authProvider: "guest",
+      referralEligible: deviceIsNew,
     });
     recordNewUser();
+    markDeviceSeen(normalizedDeviceId);
+    ensureReferralCode(user).catch((err) =>
+      console.error("ensureReferralCode error:", err),
+    );
+
+    // A bad code never blocks signup; the app shows `referral.reason`
+    const referral = referralCode
+      ? await linkReferral(user, referralCode).catch((err) => {
+          console.error("linkReferral error:", err);
+          return { ok: false, reason: "ERROR" };
+        })
+      : null;
 
     // Respond with user data and token
     res.status(201).json({
@@ -57,6 +79,7 @@ exports.register = async (req, res) => {
           name: user.name,
           createdAt: user.createdAt,
         },
+        referral,
       },
     });
   } catch (error) {
@@ -227,6 +250,7 @@ exports.checkBan = async (req, res) => {
       data: {
         banned: !!banned,
         reason: banned ? banned.reason : null,
+        expiresAt: banned ? banned.expiresAt : null,
       },
     });
   } catch (error) {
@@ -275,11 +299,13 @@ exports.googleRegister = async (req, res) => {
             code: "DEVICE_BANNED",
             error: "This device has been banned",
             reason: banned.reason,
+            expiresAt: banned.expiresAt,
           });
         }
       }
     }
 
+    const deviceIsNew = await isDeviceNew(normalizedDeviceId);
     const user = await User.create({
       name: payload.name,
       email: email || undefined,
@@ -287,8 +313,13 @@ exports.googleRegister = async (req, res) => {
       profilePicture: payload.picture,
       authProvider: "google",
       deviceId: normalizedDeviceId,
+      referralEligible: deviceIsNew,
     });
     recordNewUser();
+    markDeviceSeen(normalizedDeviceId);
+    ensureReferralCode(user).catch((err) =>
+      console.error("ensureReferralCode error:", err),
+    );
 
     res.status(201).json({
       success: true,
@@ -300,6 +331,8 @@ exports.googleRegister = async (req, res) => {
           authProvider: user.authProvider,
           createdAt: user.createdAt,
         },
+        // App shows the optional code step only when a code could still be accepted
+        canEnterReferral: deviceIsNew,
       },
     });
   } catch (error) {
@@ -359,6 +392,7 @@ exports.googleLogin = async (req, res) => {
     const normalizedDeviceId = normalizeDeviceId(deviceId);
     if (normalizedDeviceId) {
       user.deviceId = normalizedDeviceId;
+      markDeviceSeen(normalizedDeviceId);
     }
 
     if (adopted || normalizedDeviceId) {
@@ -391,6 +425,7 @@ exports.googleLogin = async (req, res) => {
             code: "DEVICE_BANNED",
             error: "This device has been banned",
             reason: banned.reason,
+            expiresAt: banned.expiresAt,
           });
         }
       }

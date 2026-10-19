@@ -15,5 +15,6 @@ router.use("/friends", require("./friends.routes"));
 router.use("/coins", require("./coins.route"));
 router.use("/shop", require("./shop.route"));
 router.use("/roles", require("./roles.route"));
+router.use("/referrals", require("./referral.route"));
 
 module.exports = router;

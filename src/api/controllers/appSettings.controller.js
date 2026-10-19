@@ -65,6 +65,7 @@ exports.updateSettings = async (req, res) => {
       maintenanceMessage,
       coinRewards,
       communityLinks,
+      referral,
     } = req.body;
     const settings = await AppSettings.getSettings();
 
@@ -87,6 +88,14 @@ exports.updateSettings = async (req, res) => {
         settings.coinRewards.adReward = coinRewards.adReward;
       if (typeof coinRewards.maxAdsPerDay === "number")
         settings.coinRewards.maxAdsPerDay = coinRewards.maxAdsPerDay;
+    }
+    if (referral && typeof referral === "object") {
+      if (typeof referral.enabled === "boolean")
+        settings.referral.enabled = referral.enabled;
+      for (const key of ["referrerReward", "refereeReward", "maxPerReferrer"]) {
+        if (typeof referral[key] === "number" && referral[key] >= 0)
+          settings.referral[key] = Math.floor(referral[key]);
+      }
     }
     if (communityLinks && typeof communityLinks === "object") {
       if (typeof communityLinks.enabled === "boolean")

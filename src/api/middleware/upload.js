@@ -41,4 +41,20 @@ const shopItemImage = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
 
-module.exports = { adImage, shopItemImage };
+// --- Announcement images: disk storage like ads ---
+const announcementsDir = path.join(process.cwd(), "uploads", "announcements");
+ensureDir(announcementsDir);
+
+const announcementImage = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, announcementsDir),
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      cb(null, uniqueSuffix + path.extname(file.originalname));
+    },
+  }),
+  fileFilter: imageFileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+});
+
+module.exports = { adImage, shopItemImage, announcementImage };

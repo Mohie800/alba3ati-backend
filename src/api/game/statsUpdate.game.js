@@ -1,6 +1,7 @@
 const User = require("../models/user.model");
 const CoinTransaction = require("../models/coinTransaction.model");
 const AppSettings = require("../models/appSettings.model");
+const { payDueReferrals } = require("../services/referral.service");
 
 // Determines if a player won based on their roleId and the gameResult
 function didPlayerWin(roleId, gameResult) {
@@ -142,6 +143,16 @@ async function updatePlayerStats(room, gameResult) {
         console.error("Error inserting coin transactions:", err),
       );
     }
+
+    // Referral bonus pays out on the referee's first game they stayed in to the end
+    const finishedIds = players
+      .filter((p) => !p.leftMidGame)
+      .map((p) =>
+        typeof p.player === "object" && p.player._id ? p.player._id : p.player,
+      );
+    payDueReferrals(finishedIds).catch((err) =>
+      console.error("Error paying referrals:", err),
+    );
 
     return coinRewards;
   } catch (error) {

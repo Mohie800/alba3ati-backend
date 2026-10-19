@@ -14,6 +14,8 @@ const friendshipAdminController = require("../controllers/friendship.admin.contr
 const shopAdminController = require("../controllers/shop.admin.controller");
 const rolesAdminController = require("../controllers/roles.admin.controller");
 const livekitAdminController = require("../controllers/livekit.admin.controller");
+const referralController = require("../controllers/referral.controller");
+const announcementController = require("../controllers/announcement.controller");
 const upload = require("../middleware/upload");
 
 // Public
@@ -93,6 +95,11 @@ router.delete("/ads/:id", adminAuth, adController.deleteAd);
 // Daily Stats / Analytics
 router.get("/daily-stats", adminAuth, dailyStatsController.getDailyStats);
 router.get("/coin-stats", adminAuth, statsController.getCoinStats);
+router.get(
+  "/coin-transactions",
+  adminAuth,
+  statsController.getCoinTransactions,
+);
 
 // Friendships (admin)
 router.get(
@@ -131,6 +138,25 @@ router.delete("/shop-items/:id", adminAuth, shopAdminController.deleteShopItem);
 // Roles (admin) — lock/price configuration for game roles
 router.get("/roles", adminAuth, rolesAdminController.getRoles);
 router.put("/roles/:roleId", adminAuth, rolesAdminController.updateRole);
+
+// Announcements (admin) — multipart with an optional "image" file
+router.get("/announcements", adminAuth, announcementController.list);
+router.post(
+  "/announcements",
+  adminAuth,
+  upload.announcementImage.single("image"),
+  announcementController.create,
+);
+router.put(
+  "/announcements/:id",
+  adminAuth,
+  upload.announcementImage.single("image"),
+  announcementController.update,
+);
+router.delete("/announcements/:id", adminAuth, announcementController.remove);
+
+// Referrals (admin)
+router.get("/referrals", adminAuth, referralController.adminList);
 
 // Player Coins (admin)
 router.get("/players/:id/coins", adminAuth, shopAdminController.getPlayerCoins);

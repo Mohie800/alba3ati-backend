@@ -18,6 +18,13 @@ const appSettingsSchema = new mongoose.Schema(
       adReward: { type: Number, default: 15 },
       maxAdsPerDay: { type: Number, default: 5 },
     },
+    referral: {
+      enabled: { type: Boolean, default: true },
+      referrerReward: { type: Number, default: 100 },
+      refereeReward: { type: Number, default: 100 },
+      // 0 = no cap
+      maxPerReferrer: { type: Number, default: 0 },
+    },
     communityLinks: {
       enabled: { type: Boolean, default: false },
       whatsapp: {

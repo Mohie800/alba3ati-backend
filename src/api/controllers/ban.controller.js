@@ -1,4 +1,5 @@
 const BannedDevice = require("../models/bannedDevice.model");
+const { paging, containsRegex } = require("../../utils/listQuery");
 
 const normalizeDeviceId = (id) => id.trim().toLowerCase();
 
@@ -58,19 +59,25 @@ exports.banDevice = async (req, res) => {
   }
 };
 
+// ?search=<device or reason>&status=permanent|temporary|expired
 exports.listBans = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = paging(req.query);
+    const now = new Date();
+    const query = {};
+    const rx = containsRegex(req.query.search);
+    if (rx) query.$or = [{ deviceId: rx }, { reason: rx }];
+    if (req.query.status === "permanent") query.expiresAt = null;
+    if (req.query.status === "temporary") query.expiresAt = { $gt: now };
+    if (req.query.status === "expired") query.expiresAt = { $lte: now };
 
     const [bans, total] = await Promise.all([
-      BannedDevice.find()
+      BannedDevice.find(query)
         .populate("bannedBy", "username")
         .sort({ bannedAt: -1 })
         .skip(skip)
         .limit(limit),
-      BannedDevice.countDocuments(),
+      BannedDevice.countDocuments(query),
     ]);
 
     res.json({

@@ -1,4 +1,5 @@
 const User = require("../models/user.model");
+const { containsRegex, dateRange } = require("../../utils/listQuery");
 const Notification = require("../models/notification.model");
 const {
   sendPushNotification,
@@ -56,13 +57,23 @@ exports.getNotifications = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
+    // ?search=&type=broadcast|targeted|contact_response&from=&to=
+    const query = {};
+    const rx = containsRegex(req.query.search);
+    if (rx) query.$or = [{ title: rx }, { body: rx }];
+    if (["broadcast", "targeted", "contact_response"].includes(req.query.type)) {
+      query.type = req.query.type;
+    }
+    const sent = dateRange(req.query.from, req.query.to);
+    if (sent) query.sentAt = sent;
+
     const [notifications, total] = await Promise.all([
-      Notification.find()
+      Notification.find(query)
         .sort({ sentAt: -1 })
         .skip(skip)
         .limit(limit)
         .populate("sentBy", "username"),
-      Notification.countDocuments(),
+      Notification.countDocuments(query),
     ]);
 
     res.json({

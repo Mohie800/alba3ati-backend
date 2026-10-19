@@ -34,6 +34,11 @@ module.exports = (app) => {
   // given URL never change — cache aggressively for fast repeat loads on mobile.
   app.use(
     "/uploads",
+    // Public images; helmet's default same-origin CORP blocks the admin dashboard (another origin)
+    (req, res, next) => {
+      res.set("Cross-Origin-Resource-Policy", "cross-origin");
+      next();
+    },
     express.static(path.join(process.cwd(), "uploads"), {
       maxAge: "30d",
       immutable: true,

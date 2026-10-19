@@ -5,6 +5,7 @@
 // Callers only report facts (socket identified / left / changed room, room
 // status changed) and call refreshSocket; listeners hear only real changes.
 
+const { recordAppUser } = require("../game/dailyStats.game");
 const userSockets = new Map(); // userId -> Set<socket>
 const presenceMap = new Map(); // userId -> { status, roomId?, roomStatus? }
 const pendingOffline = new Map(); // userId -> timeout
@@ -92,6 +93,7 @@ function attachSocket(socket, userId) {
   if (!userSockets.has(id)) userSockets.set(id, new Set());
   userSockets.get(id).add(socket);
   cancelPendingOffline(id);
+  recordAppUser(id);
   refresh(id);
 }
 
@@ -191,6 +193,11 @@ function getOnlineCount() {
   return presenceMap.size;
 }
 
+// Distinct signed-in users with a live socket (no offline-debounce stragglers)
+function getConnectedUserCount() {
+  return userSockets.size;
+}
+
 function getOnlinePlayers() {
   const result = [];
   for (const [userId, presence] of presenceMap) {
@@ -213,5 +220,6 @@ module.exports = {
   setCachedFriends,
   invalidateFriendsCache,
   getOnlineCount,
+  getConnectedUserCount,
   getOnlinePlayers,
 };

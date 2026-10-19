@@ -1,4 +1,5 @@
 const Contact = require("../models/contact.model");
+const { containsRegex, dateRange } = require("../../utils/listQuery");
 const { sendPushNotification } = require("../services/pushNotification.service");
 
 exports.submitContact = async (req, res) => {
@@ -61,6 +62,18 @@ exports.getContacts = async (req, res) => {
     const query = {};
     if (status) query.status = status;
     if (source) query.source = source;
+    const rx = containsRegex(req.query.search);
+    if (rx) {
+      query.$or = [
+        { playerName: rx },
+        { email: rx },
+        { phone: rx },
+        { subject: rx },
+        { message: rx },
+      ];
+    }
+    const created = dateRange(req.query.from, req.query.to);
+    if (created) query.createdAt = created;
 
     const [contacts, total] = await Promise.all([
       Contact.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),
