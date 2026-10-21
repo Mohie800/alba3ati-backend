@@ -382,6 +382,7 @@ const TX_TYPES = [
   "role_purchase",
   "admin_adjust",
   "referral_bonus",
+  "weekly_reward",
 ];
 
 // GET /api/admin/coin-transactions?type=&direction=earn|spend&search=<player>&from=&to=&page=

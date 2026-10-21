@@ -16,6 +16,7 @@ const rolesAdminController = require("../controllers/roles.admin.controller");
 const livekitAdminController = require("../controllers/livekit.admin.controller");
 const referralController = require("../controllers/referral.controller");
 const announcementController = require("../controllers/announcement.controller");
+const leaderboardController = require("../controllers/leaderboard.controller");
 const upload = require("../middleware/upload");
 
 // Public
@@ -157,6 +158,9 @@ router.delete("/announcements/:id", adminAuth, announcementController.remove);
 
 // Referrals (admin)
 router.get("/referrals", adminAuth, referralController.adminList);
+
+// Weekly leaderboard (admin)
+router.get("/weekly-leaderboard", adminAuth, leaderboardController.adminWeekly);
 
 // Player Coins (admin)
 router.get("/players/:id/coins", adminAuth, shopAdminController.getPlayerCoins);

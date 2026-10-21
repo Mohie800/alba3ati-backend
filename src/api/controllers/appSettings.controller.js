@@ -66,6 +66,7 @@ exports.updateSettings = async (req, res) => {
       coinRewards,
       communityLinks,
       referral,
+      weeklyLeaderboard,
     } = req.body;
     const settings = await AppSettings.getSettings();
 
@@ -95,6 +96,14 @@ exports.updateSettings = async (req, res) => {
       for (const key of ["referrerReward", "refereeReward", "maxPerReferrer"]) {
         if (typeof referral[key] === "number" && referral[key] >= 0)
           settings.referral[key] = Math.floor(referral[key]);
+      }
+    }
+    if (weeklyLeaderboard && typeof weeklyLeaderboard === "object") {
+      if (typeof weeklyLeaderboard.enabled === "boolean")
+        settings.weeklyLeaderboard.enabled = weeklyLeaderboard.enabled;
+      for (const key of ["firstReward", "secondReward", "thirdReward"]) {
+        if (typeof weeklyLeaderboard[key] === "number" && weeklyLeaderboard[key] >= 0)
+          settings.weeklyLeaderboard[key] = Math.floor(weeklyLeaderboard[key]);
       }
     }
     if (communityLinks && typeof communityLinks === "object") {

@@ -46,7 +46,6 @@ const userSchema = new mongoose.Schema({
 
 userSchema.index({ "stats.gamesWon": -1, "stats.gamesPlayed": 1 });
 userSchema.index({ deviceId: 1 });
-userSchema.index({ googleId: 1 }, { sparse: true });
 userSchema.index({ name: "text" });
 
 module.exports = mongoose.model("User", userSchema);

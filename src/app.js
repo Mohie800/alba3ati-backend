@@ -6,6 +6,7 @@ const mongooseLoader = require("./loaders/mongoose");
 const socketioLoader = require("./loaders/socket.io");
 const { recoverActiveRooms } = require("./api/game/recovery.game");
 const { waitForIdle } = require("./api/game/roomLock");
+const { startWeeklyPayouts } = require("./api/services/weeklyLeaderboard.service");
 
 const startServer = async () => {
   const app = express();
@@ -36,6 +37,8 @@ const startServer = async () => {
   server.listen(config.port, () => {
     console.log(`Server running on port ${config.port}`);
   });
+
+  startWeeklyPayouts();
 
   // PM2 stop/restart: let in-flight room updates finish, then exit without
   // running leave logic, so the next start resumes every game.

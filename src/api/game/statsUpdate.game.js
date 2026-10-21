@@ -2,6 +2,7 @@ const User = require("../models/user.model");
 const CoinTransaction = require("../models/coinTransaction.model");
 const AppSettings = require("../models/appSettings.model");
 const { payDueReferrals } = require("../services/referral.service");
+const { recordWeeklyGame } = require("../services/weeklyLeaderboard.service");
 
 // Determines if a player won based on their roleId and the gameResult
 function didPlayerWin(roleId, gameResult) {
@@ -153,6 +154,15 @@ async function updatePlayerStats(room, gameResult) {
     payDueReferrals(finishedIds).catch((err) =>
       console.error("Error paying referrals:", err),
     );
+
+    recordWeeklyGame(
+      players.map((p) => ({
+        playerId:
+          typeof p.player === "object" && p.player._id ? p.player._id : p.player,
+        won: didPlayerWin(p.roleId, gameResult) === "win",
+        finished: !p.leftMidGame,
+      })),
+    ).catch((err) => console.error("Error recording weekly scores:", err));
 
     return coinRewards;
   } catch (error) {

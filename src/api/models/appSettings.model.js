@@ -25,6 +25,12 @@ const appSettingsSchema = new mongoose.Schema(
       // 0 = no cap
       maxPerReferrer: { type: Number, default: 0 },
     },
+    weeklyLeaderboard: {
+      enabled: { type: Boolean, default: true },
+      firstReward: { type: Number, default: 500 },
+      secondReward: { type: Number, default: 300 },
+      thirdReward: { type: Number, default: 150 },
+    },
     communityLinks: {
       enabled: { type: Boolean, default: false },
       whatsapp: {

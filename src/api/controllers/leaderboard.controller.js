@@ -56,3 +56,133 @@ exports.getLeaderboard = async (req, res) => {
     res.status(500).json({ success: false, error: "Failed to fetch leaderboard" });
   }
 };
+
+const WeeklyScore = require("../models/weeklyScore.model");
+const WeeklyResult = require("../models/weeklyResult.model");
+const AppSettings = require("../models/appSettings.model");
+const mongoose = require("mongoose");
+const weekly = require("../services/weeklyLeaderboard.service");
+
+const publicPlayer = (u) => ({
+  _id: u._id,
+  name: u.name,
+  frame: u.frame || null,
+  nameColor: u.nameColor || null,
+  equippedProfilePicture: u.equippedProfilePicture || null,
+});
+
+const WINNER_FIELDS = "name frame nameColor equippedProfilePicture";
+
+// GET /api/leaderboard/weekly?page=1&limit=20&userId=
+exports.getWeeklyLeaderboard = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+    const skip = (page - 1) * limit;
+    const week = weekly.weekKey();
+    const { startsAt, endsAt } = weekly.weekBounds(week);
+    const userId = mongoose.isValidObjectId(req.query.userId) ? req.query.userId : null;
+
+    const [settings, rows, total, me, lastResult] = await Promise.all([
+      AppSettings.getSettings(),
+      weekly.getRanking(week, skip, limit),
+      WeeklyScore.countDocuments({ week, wins: { $gt: 0 } }),
+      userId ? weekly.getPlayerRank(week, userId) : null,
+      page === 1
+        ? WeeklyResult.findOne({ week: weekly.previousWeekKey(week) })
+            .populate("winners.user", WINNER_FIELDS)
+            .lean()
+        : null,
+    ]);
+
+    const leaderboard = rows
+      .filter((r) => r.user)
+      .map((r, i) => ({
+        ...publicPlayer(r.user),
+        rank: skip + i + 1,
+        wins: r.wins,
+        games: r.games,
+      }));
+
+    const lastWeek = lastResult
+      ? {
+          week: lastResult.week,
+          winners: lastResult.winners
+            .filter((w) => w.user)
+            .map((w) => ({
+              ...publicPlayer(w.user),
+              rank: w.rank,
+              wins: w.wins,
+              coins: w.coins,
+            })),
+        }
+      : null;
+
+    res.json({
+      success: true,
+      data: {
+        week,
+        startsAt,
+        endsAt,
+        serverNow: new Date(),
+        enabled: settings.weeklyLeaderboard?.enabled !== false,
+        rewards: weekly.rewardAmounts(settings),
+        leaderboard,
+        me,
+        lastWeek,
+        pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+      },
+    });
+  } catch (error) {
+    console.error("Weekly leaderboard error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch weekly leaderboard" });
+  }
+};
+
+// GET /api/admin/weekly-leaderboard?page=1 — live top 10 plus past weeks' winners
+exports.adminWeekly = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, parseInt(req.query.limit) || 10);
+    const week = weekly.weekKey();
+
+    const [current, players, results, totalResults] = await Promise.all([
+      weekly.getRanking(week, 0, 10),
+      WeeklyScore.countDocuments({ week }),
+      WeeklyResult.find()
+        .sort({ week: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate("winners.user", "name")
+        .lean(),
+      WeeklyResult.countDocuments(),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        week,
+        ...weekly.weekBounds(week),
+        players,
+        current: current
+          .filter((r) => r.user)
+          .map((r, i) => ({
+            rank: i + 1,
+            user: { _id: r.user._id, name: r.user.name },
+            wins: r.wins,
+            games: r.games,
+          })),
+        results,
+        pagination: {
+          page,
+          limit,
+          total: totalResults,
+          totalPages: Math.ceil(totalResults / limit),
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Admin weekly leaderboard error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch weekly leaderboard" });
+  }
+};
